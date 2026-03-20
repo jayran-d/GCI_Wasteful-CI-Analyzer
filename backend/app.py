@@ -22,25 +22,25 @@ from github_client import GitHubClient
 from energy import estimate_energy, aggregate_estimates, detect_runner_type
 from impact import compute_impact
 from utils import run_duration
-from analyzers import (
-    FlakinessAnalyzer,
-    ZombieWorkflowAnalyzer,
-    ExternalDepsAnalyzer,
-    InefficientTriggerAnalyzer,
-    RateLimitAnalyzer,
-)
+# from analyzers import (
+#     FlakinessAnalyzer,
+#     ZombieWorkflowAnalyzer,
+#     ExternalDepsAnalyzer,
+#     InefficientTriggerAnalyzer,
+#     RateLimitAnalyzer,
+# )
 
 app = Flask(__name__)
 CORS(app)
 
-ANALYZER_LIST = [
-    ("flakiness", FlakinessAnalyzer),
-    ("zombie_scheduled", ZombieWorkflowAnalyzer),
-    ("external_deps", ExternalDepsAnalyzer),
-    ("inefficient_triggers", InefficientTriggerAnalyzer),
-    ("rate_limit_token", RateLimitAnalyzer),
-] #TENTATIVE, let's start with these 5 as discussed, we might have to change one or 2 TODO
-ANALYZER_MAP = dict(ANALYZER_LIST)
+# ANALYZER_LIST = [
+#     ("flakiness", FlakinessAnalyzer),
+#     ("zombie_scheduled", ZombieWorkflowAnalyzer),
+#     ("external_deps", ExternalDepsAnalyzer),
+#     ("inefficient_triggers", InefficientTriggerAnalyzer),
+#     ("rate_limit_token", RateLimitAnalyzer),
+# ] #TENTATIVE, let's start with these 5 as discussed, we might have to change one or 2 TODO
+# ANALYZER_MAP = dict(ANALYZER_LIST)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -384,4 +384,4 @@ def analyze_stream():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5001)
