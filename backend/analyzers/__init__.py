@@ -5,9 +5,9 @@ from analyzers.inefficient_triggers import InefficientTriggerAnalyzer
 from analyzers.rate_limit import RateLimitAnalyzer
 
 ALL_ANALYZERS = [
-    FlakinessAnalyzer,
-    ZombieWorkflowAnalyzer,
+    FlakinessAnalyzer, # Nico
+    ZombieWorkflowAnalyzer, # Maja
     ExternalDepsAnalyzer,
-    InefficientTriggerAnalyzer,
-    RateLimitAnalyzer,
+    InefficientTriggerAnalyzer, # Jay
+    RateLimitAnalyzer, # Erkin / Unless we change this?
 ]
