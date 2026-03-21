@@ -1,5 +1,37 @@
 # EcoCI-Waste-Analyzer
 
+Analyzes GitHub Actions workflows to identify wasteful CI practices and quantify their environmental impact (energy consumption, CO2 emissions, cost).
+
+## How to run
+
+```bash
+# 1. Install dependencies
+cd backend && pip install -r requirements.txt
+
+# 2. Get a GitHub token (see GitHub Token Setup)
+# Save it to .env file:
+echo "GITHUB_TOKEN=ghp_your_token_here" > .env
+
+# 3. Run the server
+python app.py
+```
+
+API runs at: `http://localhost:5001`
+
+## Test
+
+The token is automatically read from the `.env` file you created in step 2. Replace `your-org/your-repo` with the repository you want to analyze. In a new terminal paste:
+
+```bash
+curl -X POST http://localhost:5001/api/analyze/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_url": "https://github.com/your-org/your-repo"
+  }'
+```
+
+---
+
 ## GitHub Token Setup
 
 To use the EcoCI-Waste-Analyzer, you need a GitHub Personal Access Token for authentication.
@@ -17,16 +49,14 @@ To use the EcoCI-Waste-Analyzer, you need a GitHub Personal Access Token for aut
 
 ### Using the Token
 
-#### Option 1: Environment Variable (Recommended)
-1. Create a `.env` file in the `backend/` directory:
-   ```bash
-   GITHUB_TOKEN=ghp_your_token_here
-   ```
-2. Make sure `.env` is in `.gitignore` 
-3. Load it in your Python code with `python-dotenv`
+**Option 1: Environment Variable (Recommended)**
+Save the token to `backend/.env`:
+```bash
+GITHUB_TOKEN=ghp_your_token_here
+```
 
-#### Option 2: Request Body
-Include the token in the JSON payload when calling the API:
+**Option 2: Pass in API Request**
+Include it in the JSON payload:
 ```json
 {
   "repo_url": "https://github.com/owner/repo",
@@ -39,3 +69,11 @@ Include the token in the JSON payload when calling the API:
 ### Rate Limits
 - **Without token**: 60 API calls/hour (unauthenticated)
 - **With token**: 5,000 API calls/hour (authenticated)
+
+## API Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/analyze/stream` | Stream analysis with real-time progress |
+| GET | `/api/health` | Health check |
+| GET | `/` | API info |

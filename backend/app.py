@@ -15,6 +15,8 @@ import queue
 import threading
 import traceback
 from collections import defaultdict
+from dotenv import load_dotenv
+import os
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 from datetime import datetime, timezone
@@ -22,6 +24,9 @@ from github_client import GitHubClient
 from energy import estimate_energy, aggregate_estimates, detect_runner_type
 from impact import compute_impact
 from utils import run_duration
+
+# Load environment variables from .env file
+load_dotenv()
 # from analyzers import (
 #     FlakinessAnalyzer,
 #     ZombieWorkflowAnalyzer,
@@ -62,7 +67,8 @@ def analyze_stream():
     """Stream analysis progress via SSE over POST."""
     body = request.get_json(force=True)
     repo_url = body.get("repo_url", "").strip()
-    token = body.get("github_token") or None
+    # Load token from .env first, then fall back to request body
+    token = os.getenv("GITHUB_TOKEN") or body.get("github_token") or None
     start_date = body.get("start_date")
     end_date = body.get("end_date")
     deep_scan = body.get("deep_scan", False)
