@@ -1,2 +1,7 @@
 /backend/__pycache__/
 backend/analyzers/__pycache__
+
+backend/.venv
+backend/.env
+script_4.py
+old_inefficient_triggers.py
