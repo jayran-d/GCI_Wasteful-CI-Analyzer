@@ -94,18 +94,34 @@ class InefficientTriggerAnalyzer:
         if not files:
             return False
 
+        doc_filenames = {
+            "readme",
+            "license",
+            "changelog",
+            "contributing",
+            "code_of_conduct",
+            "authors",
+        }
+
+        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
+
         for file_path in files:
             lowered = file_path.lower()
-            if not (
-                lowered.endswith(".md")
-                or lowered.startswith("docs/")
-                or lowered.endswith(".png")
-                or lowered.endswith(".jpg")
-                or lowered.endswith(".jpeg")
-                or lowered.endswith(".gif")
-                or lowered.endswith(".txt")
-            ):
-                return False
+            basename = lowered.split("/")[-1]
+
+            if lowered.startswith("docs/") or lowered.startswith("documentation/"):
+                continue
+
+            if lowered.endswith(".md") or lowered.endswith(".rst") or lowered.endswith(".adoc"):
+                continue
+
+            if lowered.endswith(image_extensions):
+                continue
+
+            if basename in doc_filenames:
+                continue
+
+            return False
 
         return True
 
