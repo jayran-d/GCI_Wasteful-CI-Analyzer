@@ -27,6 +27,7 @@ class InefficientTriggerAnalyzer:
         inefficient_detail = []
         energy_estimates = []
         sha_cache = {}
+        workflow_cache = {}
 
         for index, run in enumerate(ci_runs, start=1):
             if run.get("conclusion") != "success":
@@ -48,14 +49,21 @@ class InefficientTriggerAnalyzer:
             changed_files = sha_cache[sha]
             if not self._is_non_functional(changed_files):
                 continue
+        
+            workflow_path = run.get("path", "")
+            if workflow_path not in workflow_cache:
+                workflow_cache[workflow_path] = self._get_trigger_info(owner, repo, workflow_path)
+
+            trigger_info = workflow_cache[workflow_path]
+            reason = self._build_reason(trigger_info)
 
             inefficient_detail.append({
                 "run_id": run["id"],
                 "workflow": workflow_name,
                 "sha": sha[:8],
                 "changed_files": changed_files,
-                "trigger_paths": [],
-                "reason": "Heavy CI workflow ran even though the commit only changed docs or other non-functional files.",
+                "trigger_paths": trigger_info["trigger_paths"],
+                "reason": reason,
             })
 
             duration_seconds = run_duration(run)
@@ -87,7 +95,7 @@ class InefficientTriggerAnalyzer:
                 "count": inefficient_count,
                 "detail": inefficient_detail[:15],
             },
-            "recommendations": self._build_recommendations(inefficient_count),
+            "recommendations": self._build_recommendations(inefficient_detail),
         }
 
     def _is_non_functional(self, files):
@@ -139,12 +147,65 @@ class InefficientTriggerAnalyzer:
 
         return False
 
-    def _build_recommendations(self, inefficient_count):
-        if inefficient_count == 0:
+    def _get_trigger_info(self, owner, repo, workflow_path):
+        if not workflow_path:
+            return {
+                "trigger_paths": [],
+                "has_path_filters": False,
+                "has_paths_ignore": False,
+            }
+
+        yaml_text = self.client.get_workflow_file(owner, repo, workflow_path)
+        if not yaml_text:
+            return {
+                "trigger_paths": [],
+                "has_path_filters": False,
+                "has_paths_ignore": False,
+            }
+
+        trigger_paths = []
+        for line in yaml_text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                value = stripped[2:].strip().strip("'\"")
+                if any(token in value for token in ["*", "/", ".md", "docs", "README"]):
+                    trigger_paths.append(value)
+
+        return {
+            "trigger_paths": trigger_paths[:10],
+            "has_path_filters": "paths:" in yaml_text,
+            "has_paths_ignore": "paths-ignore:" in yaml_text,
+        }
+
+    def _build_reason(self, trigger_info):
+        if not trigger_info["has_path_filters"] and not trigger_info["has_paths_ignore"]:
+            return (
+                "This run was flagged because the workflow appears heavy, the commit only "
+                "changed documentation or other non-functional files, and the workflow "
+                "appears to have no path-based filtering."
+            )
+
+        return (
+            "This run was flagged because the workflow appears heavy and the commit only "
+            "changed documentation or other non-functional files. The workflow has some "
+            "path-based trigger configuration, so this result is less certain."
+        )
+
+    def _build_recommendations(self, inefficient_runs):
+        if not inefficient_runs:
             return ["No obvious docs-only trigger inefficiencies were detected."]
 
-        return [
-            "Add path filters or paths-ignore rules so docs-only changes do not trigger full CI workflows.",
+        has_broad_triggers = any(not run["trigger_paths"] for run in inefficient_runs)
+
+        recommendations = [
             "Split lightweight checks from expensive build, test, or deploy workflows where possible.",
             "Consider using [skip ci] for trivial documentation-only updates when appropriate.",
         ]
+
+        if has_broad_triggers:
+            recommendations.insert(
+                0,
+                "Add path filters or paths-ignore rules so docs-only changes do not trigger full CI workflows.",
+            )
+
+        return recommendations
