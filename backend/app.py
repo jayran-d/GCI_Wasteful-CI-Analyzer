@@ -11,6 +11,7 @@ Routes:
 """
 
 import json
+import os
 import queue
 import threading
 import traceback
@@ -18,32 +19,31 @@ from collections import defaultdict
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 from github_client import GitHubClient
 from energy import estimate_energy, aggregate_estimates, detect_runner_type
 from impact import compute_impact
 from utils import run_duration
-
-from analyzers.inefficient_triggers import InefficientTriggerAnalyzer
-
+from analyzers.zombie_workflows import ZombieWorkflowAnalyzer
+from analyzers.flakiness import FlakinessAnalyzer
+from analyzers.external_deps import ExternalDepsAnalyzer
 # from analyzers import (
-#     InefficientTriggerAnalyzer
-#     #FlakinessAnalyzer,
-#    # ZombieWorkflowAnalyzer,
-#    # ExternalDepsAnalyzer,
-    
-#    # RateLimitAnalyzer,
+#     FlakinessAnalyzer,
+#     InefficientTriggerAnalyzer,
+#     RateLimitAnalyzer,
 # )
 
 app = Flask(__name__)
 CORS(app)
+load_dotenv()
 
 ANALYZER_LIST = [
-    #("flakiness", FlakinessAnalyzer),
-    #("zombie_scheduled", ZombieWorkflowAnalyzer),
-    #("external_deps", ExternalDepsAnalyzer),~
-    ("inefficient_triggers", InefficientTriggerAnalyzer)
-    #("rate_limit_token", RateLimitAnalyzer),
-] #TENTATIVE, let's start with these 5 as discussed, we might have to change one or 2 TODO
+    ("flakiness", FlakinessAnalyzer),
+    ("zombie_scheduled", ZombieWorkflowAnalyzer),
+    ("external_deps", ExternalDepsAnalyzer),
+    # ("inefficient_triggers", InefficientTriggerAnalyzer),
+    # ("rate_limit_token", RateLimitAnalyzer),
+]
 ANALYZER_MAP = dict(ANALYZER_LIST)
 
 
@@ -66,10 +66,15 @@ def analyze_stream():
     """Stream analysis progress via SSE over POST."""
     body = request.get_json(force=True)
     repo_url = body.get("repo_url", "").strip()
-    token = body.get("github_token") or None
+    token = body.get("github_token") or os.getenv("GITHUB_TOKEN") or None
     start_date = body.get("start_date")
     end_date = body.get("end_date")
     deep_scan = body.get("deep_scan", False)
+    all_events_raw = body.get("all_events", False)
+    if isinstance(all_events_raw, str):
+        all_events = all_events_raw.strip().lower() in ("1", "true", "yes", "on")
+    else:
+        all_events = bool(all_events_raw)
 
     def generate():
         nonlocal deep_scan
@@ -107,6 +112,7 @@ def analyze_stream():
         yield _sse("connected", {
             "owner": owner, "repo": repo,
             "start_date": start_date, "end_date": end_date,
+            "all_events": all_events,
             "rate_limit": rate_info,
             "authenticated": client.authenticated,
             "warnings": warnings,
@@ -206,6 +212,8 @@ def analyze_stream():
                     kwargs = {"progress_cb": cb}
                     if k in ("external_deps", "rate_limit_token"): #only for these two analyzers for now, we can add more if needed?
                         kwargs["deep_scan"] = ds
+                    if k == "flakiness":
+                        kwargs["all_events"] = all_events
                     rb["result"] = a.analyze(o, r, runs, **kwargs)
                 except Exception as e:
                     q.put(f"Analyzer error: {e}")
