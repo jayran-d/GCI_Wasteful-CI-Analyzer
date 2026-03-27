@@ -39,8 +39,8 @@ load_dotenv()
 
 ANALYZER_LIST = [
     ("flakiness", FlakinessAnalyzer),
-    ("zombie_scheduled", ZombieWorkflowAnalyzer),
-    ("external_deps", ExternalDepsAnalyzer),
+    # ("zombie_scheduled", ZombieWorkflowAnalyzer),
+    # ("external_deps", ExternalDepsAnalyzer),
     # ("inefficient_triggers", InefficientTriggerAnalyzer),
     # ("rate_limit_token", RateLimitAnalyzer),
 ]
@@ -130,7 +130,7 @@ def analyze_stream():
         all_runs = []
         try:
             for page_num, page_runs, total_count in client.get_workflow_runs_paged(
-                owner, repo, created=created, max_pages=10
+                owner, repo, created=created, max_pages=100
             ):
                 all_runs.extend(page_runs)
                 yield _sse("runs_page", {
