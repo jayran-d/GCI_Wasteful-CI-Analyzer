@@ -12,7 +12,7 @@ Layers:
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from energy import estimate_energy, aggregate_estimates, detect_runner_type, EnergyEstimate
-from utils import run_duration
+from utils import run_duration, get_run_duration_from_jobs
 
 
 EXTERNAL_ERROR_PATTERNS = {
@@ -59,7 +59,6 @@ ALL_PATTERNS_FLAT = [
     (cat, p) for cat, patterns in EXTERNAL_ERROR_PATTERNS.items() for p in patterns
 ]
 
-# step names that indicate setup/install phase
 SETUP_STEP_KEYWORDS = [
     "checkout", "setup", "install", "cache", "restore", "download",
     "fetch", "pull", "docker", "build image", "npm ci", "npm install",
@@ -93,13 +92,12 @@ class ExternalDepsAnalyzer:
             progress_cb("Detecting early-death transient failures...")
         early_deaths = self._detect_early_death_transients(runs)
         if progress_cb:
-            progress_cb(f"→ {len(early_deaths)} early-death transients found")
+            progress_cb(f"\u2192 {len(early_deaths)} early-death transients found")
             progress_cb("Scanning for temporal clusters (outage windows)...")
         clusters = self._detect_temporal_clusters(failed_runs)
         if progress_cb:
-            progress_cb(f"→ {len(clusters)} temporal clusters found")
+            progress_cb(f"\u2192 {len(clusters)} temporal clusters found")
 
-        # Budget-aware: each failed run = 1 API call for jobs
         budget_ok = self.client.has_budget(min(len(failed_runs), 50))
         if not budget_ok and progress_cb:
             progress_cb(f"Low API budget ({self.client.rate_remaining} left) i.e. limiting detailed checks to 10 runs")
@@ -135,9 +133,9 @@ class ExternalDepsAnalyzer:
                     progress_cb(f"Deep scan: downloading logs [{idx+1}/{len(targets)}] {self._run_url}/{r['id']}")
                 finding = self._analyze_run_logs(owner, repo, r)
                 if not finding["categories"] and progress_cb:
-                    progress_cb(f"  ↳ no external error patterns found")
+                    progress_cb(f"  \u21b3 no external error patterns found")
                 elif progress_cb:
-                    progress_cb(f"  ↳ found: {', '.join(finding['categories'])}")
+                    progress_cb(f"  \u21b3 found: {', '.join(finding['categories'])}")
                 if finding["categories"]:
                     log_findings.append(finding)
                     flagged_ids.add(r["id"])
@@ -145,14 +143,16 @@ class ExternalDepsAnalyzer:
                         service_breakdown[cat] += 1
             flagged_runs = [r for r in failed_runs if r["id"] in flagged_ids]
 
-        # --- Energy ---
+        # --- Energy: use jobs-based duration where cached, fallback to run-level ---
         energy_estimates = []
         for r in flagged_runs:
-            dur = run_duration(r)
+            cached_jobs = jobs_cache.get(r["id"])
+            if cached_jobs:
+                dur = get_run_duration_from_jobs(cached_jobs)
+            else:
+                dur = run_duration(r)
             if dur > 0:
-                energy_estimates.append(
-                    estimate_energy(dur, detect_runner_type(r.get("labels")))
-                )
+                energy_estimates.append(estimate_energy(dur, "linux"))
 
         result = {
             "analyzer": self.key,
@@ -186,16 +186,9 @@ class ExternalDepsAnalyzer:
 
         return result
 
-    #  Layer 1 detectors                  
-
+    # --- Layer 1 detectors ---
 
     def _detect_early_death_transients(self, runs):
-        """
-        Same-SHA fail+success where the failure was SHORT (< 40% [assumed] of median
-        success duration for that workflow). Short = died in setup/deps, not
-        in tests. Skips run_attempt > 1 (those belong to flakiness analyzer)
-        and schedule events (those belong to zombie analyzer).
-        """
         wf_success_durs: dict[int, list[float]] = defaultdict(list)
         for r in runs:
             if r.get("conclusion") == "success":
@@ -238,12 +231,11 @@ class ExternalDepsAnalyzer:
                         "created_at": r.get("created_at"),
                         "duration_s": round(dur, 1),
                         "median_success_s": round(median, 1),
-                        "reason": "Died early (< 40% of median) then same commit succeeded → environment failure",
+                        "reason": "Died early (< 40% of median) then same commit succeeded \u2192 environment failure",
                     })
         return results
 
     def _detect_temporal_clusters(self, failed_runs, window_min=30, min_cluster=3):
-        """3+ different workflows failing within a time window → outage."""
         dated = []
         for r in failed_runs:
             ts = r.get("run_started_at") or r.get("created_at")
@@ -281,7 +273,6 @@ class ExternalDepsAnalyzer:
         return clusters
 
     def _detect_third_party_action_failures(self, owner, repo, failed_runs):
-        """Failed steps using actions not from the repo owner or 'actions/' org."""
         findings = []
         jobs_cache = {}
         for idx, r in enumerate(failed_runs):
@@ -292,11 +283,11 @@ class ExternalDepsAnalyzer:
                 jobs_cache[r["id"]] = jobs
             except Exception as exc:
                 if self._cb:
-                    self._cb(f"  ↳ API call failed: {type(exc).__name__}: {str(exc)[:80]}")
+                    self._cb(f"  \u21b3 API call failed: {type(exc).__name__}: {str(exc)[:80]}")
                 jobs_cache[r["id"]] = []
                 continue
             if self._cb:
-                self._cb(f"  ↳ got {len(jobs)} jobs, checking steps...")
+                self._cb(f"  \u21b3 got {len(jobs)} jobs, checking steps...")
             for job in jobs:
                 if job.get("conclusion") != "failure":
                     continue
@@ -306,7 +297,7 @@ class ExternalDepsAnalyzer:
                     name = step.get("name", "")
                     if self._is_third_party_action(name, owner):
                         if self._cb:
-                            self._cb(f"  → Flagged: '{name}' (third-party action failed)")
+                            self._cb(f"  \u2192 Flagged: '{name}' (third-party action failed)")
                         findings.append({
                             "run_id": r["id"],
                             "job_name": job.get("name", ""),
@@ -317,7 +308,6 @@ class ExternalDepsAnalyzer:
         return findings, jobs_cache
 
     def _detect_setup_step_failures(self, owner, repo, failed_runs, jobs_cache=None):
-        """Failed steps whose names match setup/install/download patterns."""
         findings = []
         seen_runs = set()
         for idx, r in enumerate(failed_runs):
@@ -356,8 +346,6 @@ class ExternalDepsAnalyzer:
             return action_owner not in (owner.lower(), "actions", ".")
         return False
 
-    # Layer 2: log
-
     def _analyze_run_logs(self, owner, repo, run):
         logs = self.client.download_run_logs(owner, repo, run["id"])
         all_text = "\n".join(logs.values())
@@ -378,7 +366,6 @@ class ExternalDepsAnalyzer:
             "categories": sorted(cats_found),
             "sample_matches": samples,
         }
-
 
     @staticmethod
     def _build_recommendations(early_deaths, clusters, tpa, setup_fails, log_findings):

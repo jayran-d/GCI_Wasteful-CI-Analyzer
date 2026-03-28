@@ -1,14 +1,30 @@
 """
 Analyzer 1: Non-deterministic Test Flakiness.
 
-Detects waste caused by reruns where the same commit (head_sha) has mixed
-outcomes (failure and success) in the same workflow context, or explicit
-GitHub rerun attempts that fail. This usually indicates flaky tests,
-timeouts, or unstable execution environments rather than code defects.
+Detects waste by finding the same job producing different outcomes across attempts or runs
+on the same commit.
+
+KEY INSIGHT: GitHub reruns do NOT create a new run_id. They create a new ATTEMPT on the
+same run. The API listing returns only the latest attempt. Previous attempts are hidden
+behind /runs/{id}/attempts/{n}/jobs.
+
+So run #7 with run_attempt=2 means:
+  - Attempt 1 existed (maybe passed, maybe failed) — invisible in the runs list
+  - Attempt 2 is what the API shows
+
+To detect flakiness, we must:
+  1. Find runs where run_attempt > 1 (reruns happened)
+  2. Fetch jobs for EVERY attempt (1 through N)
+  3. Compare job outcomes across attempts WITHIN the same run_id
+  4. Same job, different outcomes on same run = flaky
+
+We intentionally only compare within the same run_id. Cross-run comparisons on the
+same commit produce false positives because PR state (labels, assignees, review status)
+can change between separate workflow triggers — those are state-dependent outcomes,
+not non-deterministic flakiness.
 """
 
 from collections import defaultdict
-from datetime import datetime
 from energy import aggregate_estimates, detect_runner_type, estimate_energy
 from utils import run_duration
 
@@ -17,16 +33,9 @@ class FlakinessAnalyzer:
     key = "flakiness"
     title = "Non-deterministic Test Flakiness"
     description = (
-        "Finds failures associated with unstable CI behavior (explicit reruns "
-        "or mixed outcomes on the same commit/workflow), indicating flakiness "
-        "rather than deterministic product defects."
+        "Detects flaky jobs by finding different outcomes for the same job "
+        "across rerun attempts within the same workflow run."
     )
-
-    # Tighter window for strict CI, broader window for all-events analysis.
-    STRICT_MIXED_OUTCOME_MAX_HOURS = 24
-    ALL_EVENTS_MIXED_OUTCOME_MAX_HOURS = 72
-    # Caps how many mixed-outcome groups get job-level deep checks.
-    MAX_GROUPS_FOR_JOB_FETCH = 300
 
     def __init__(self, client):
         self.client = client
@@ -35,469 +44,396 @@ class FlakinessAnalyzer:
         if progress_cb:
             progress_cb(f"Analyzing flakiness in {len(runs)} runs...")
 
-        default_branch = self._get_default_branch(owner, repo)
-        if progress_cb and default_branch:
-            progress_cb(f"Using default branch '{default_branch}' for CI event filtering")
+        run_url_base = f"https://github.com/{owner}/{repo}/actions/runs"
 
-        ci_runs = self._filter_ci_runs(runs, default_branch)
-        if progress_cb:
-            progress_cb(
-                f"Filtered to {len(ci_runs)} strict CI runs (from {len(runs)} total); "
-                f"also computing all-events scope for comparison"
-            )
+        # ── Step 1: Identify runs that have multiple attempts ───────
+        #
+        # Only runs with run_attempt > 1 are interesting — they have
+        # hidden earlier attempts we need to fetch and compare.
+        # We no longer compare across different run_ids on the same
+        # commit, since that captures state-dependent changes (e.g.
+        # PR labels added between runs), not true flakiness.
 
-        # Always compute both scopes so output can compare strict CI vs all-events.
-        ci_grouped = self._group_by_workflow_and_sha(ci_runs)
-        all_grouped = self._group_by_workflow_and_sha(runs)
-        if progress_cb:
-            progress_cb(
-                f"Grouped strict CI scope into {len(ci_grouped)} buckets; "
-                f"all-events scope into {len(all_grouped)} buckets"
-            )
+        runs_by_sha = defaultdict(list)
+        rerun_runs = []  # runs where run_attempt > 1
 
-        ci_wf_median = self._workflow_success_medians(ci_runs)
-        all_wf_median = self._workflow_success_medians(runs)
-
-        (
-            ci_flagged_runs,
-            ci_details,
-        ) = self._detect_flaky_failures(
-            owner,
-            repo,
-            ci_grouped,
-            ci_wf_median,
-            nearby_window_hours=self.STRICT_MIXED_OUTCOME_MAX_HOURS,
-            apply_short_duration_filter=True,
-        )
-
-        (
-            all_flagged_runs,
-            all_details,
-        ) = self._detect_flaky_failures(
-            owner,
-            repo,
-            all_grouped,
-            all_wf_median,
-            nearby_window_hours=self.ALL_EVENTS_MIXED_OUTCOME_MAX_HOURS,
-            apply_short_duration_filter=False,
-        )
-
-        # Primary scope controls top-level summary/energy numbers only.
-        primary_scope = "all" if all_events else "ci_only"
-        if primary_scope == "all":
-            flagged_runs = all_flagged_runs
-            details = all_details
-            primary_runs = runs
-        else:
-            flagged_runs = ci_flagged_runs
-            details = ci_details
-            primary_runs = ci_runs
-
-        energy_estimates = []
-        for run in flagged_runs:
-            dur = run_duration(run)
-            if dur <= 0:
+        for run in runs:
+            sha = run.get("head_sha")
+            if not sha:
                 continue
-            energy_estimates.append(
-                estimate_energy(dur, detect_runner_type(run.get("labels")))
-            )
-
-        total_unique_shas = self._count_unique_shas(primary_runs)
-        total_failed_runs = sum(1 for run in primary_runs if run.get("conclusion") == "failure")
-        flaky_unique_shas = self._count_unique_shas(flagged_runs)
-        ci_scope_summary = self._build_scope_summary(ci_runs, ci_flagged_runs, ci_details)
-        all_scope_summary = self._build_scope_summary(runs, all_flagged_runs, all_details)
-
-        summary = {
-            "scope": "all_events_flakiness" if all_events else "ci_test_flakiness",
-            "event_scope": primary_scope,
-            "ci_runs_analyzed": len(primary_runs),
-            "total_runs_in_fetch": len(runs),
-            "total_failed_runs": total_failed_runs,
-            "flaky_failures": len(flagged_runs),
-            "flaky_unique_shas": flaky_unique_shas,
-            "flakiness_rate_of_failures": self._pct(len(flagged_runs), total_failed_runs),
-            "flakiness_rate_of_commits": self._pct(flaky_unique_shas, total_unique_shas),
-            "rerun_failures": sum(1 for d in details if d.get("signal") == "run_attempt"),
-            "fail_then_success_failures": sum(
-                1 for d in details if d.get("signal") == "fail_then_success"
-            ),
-        }
+            if run.get("event") == "schedule" and not all_events:
+                continue
+            runs_by_sha[sha].append(run)
+            if (run.get("run_attempt") or 1) > 1:
+                rerun_runs.append(run)
 
         if progress_cb:
             progress_cb(
-                "Scope comparison complete: "
-                f"strict CI flaky={ci_scope_summary['flaky_failures']} "
-                f"({ci_scope_summary['flakiness_rate_of_failures']:.1f}% of CI failures), "
-                f"all-events flaky={all_scope_summary['flaky_failures']} "
-                f"({all_scope_summary['flakiness_rate_of_failures']:.1f}% of all-event failures)"
+                f"Found {len(rerun_runs)} rerun(s) to inspect for flakiness"
             )
+
+        if not rerun_runs:
+            return self._empty_result(runs)
+
+        # ── Step 2: Fetch jobs for all attempts of rerun runs ───────
+        #
+        # For a run with run_attempt=3, we fetch:
+        #   /runs/{id}/attempts/1/jobs
+        #   /runs/{id}/attempts/2/jobs
+        #   /runs/{id}/attempts/3/jobs
+        #
+        # Group by (run_id, job_name) so we only compare attempts
+        # within the same run — not across different runs.
+
+        job_groups = defaultdict(list)  # (run_id, job_name) → [job_info, ...]
+        api_calls = 0
+
+        for run in rerun_runs:
+            run_id = run.get("id")
+            if not run_id:
+                continue
+
+            sha = run["head_sha"]
+            max_attempt = run.get("run_attempt") or 1
+
+            for attempt_num in range(1, max_attempt + 1):
+                jobs = self._fetch_jobs_for_attempt(
+                    owner, repo, run_id, attempt_num
+                )
+                api_calls += 1
+
+                for job in jobs:
+                    job_name = job.get("name") or ""
+                    conclusion = job.get("conclusion")
+                    if not conclusion:
+                        continue
+
+                    job_groups[(run_id, job_name)].append({
+                        "run_id": run_id,
+                        "run_number": run.get("run_number"),
+                        "run_attempt": attempt_num,
+                        "max_attempt": max_attempt,
+                        "workflow_id": run.get("workflow_id"),
+                        "workflow": run.get("name") or "",
+                        "event": run.get("event"),
+                        "created_at": (
+                            job.get("started_at")
+                            or run.get("created_at")
+                        ),
+                        "conclusion": conclusion,
+                        "job_name": job_name,
+                        "job_id": job.get("id"),
+                        "duration_seconds": self._job_duration(job),
+                        "labels": job.get("labels") or run.get("labels"),
+                        "head_sha": sha,
+                    })
+
+            if progress_cb and api_calls % 5 == 0:
+                progress_cb(f"Fetched jobs from {api_calls} API calls...")
+
+        if progress_cb:
+            progress_cb(
+                f"Fetched jobs via {api_calls} API calls, "
+                f"grouped into {len(job_groups)} (run, job) pairs"
+            )
+
+        # ── Step 3: Find flaky groups ───────────────────────────────
+        #
+        # A group (run_id, job_name) is flaky if it contains BOTH
+        # "failure" and "success" conclusions across its attempts.
+        # Since all attempts share the same run_id (same commit,
+        # same trigger, same PR state), differing outcomes indicate
+        # genuine non-determinism.
+
+        flagged_jobs = []
+        flaky_job_names = defaultdict(int)
+        flaky_details = []
+
+        for (run_id, job_name), job_list in job_groups.items():
+            conclusions = {j["conclusion"] for j in job_list}
+
+            if not ("failure" in conclusions and "success" in conclusions):
+                continue
+
+            # Approval gates are not flakiness.
+            if "action_required" in conclusions:
+                continue
+
+            # Build the transition string once for this group.
+            sorted_attempts = sorted(job_list, key=lambda j: j["run_attempt"])
+            transition = " → ".join(
+                "F" if j["conclusion"] == "failure" else "S"
+                for j in sorted_attempts
+            )
+
+            # Flag every failed instance as waste.
+            for job in job_list:
+                if job["conclusion"] != "failure":
+                    continue
+
+                flagged_jobs.append(job)
+                flaky_job_names[job_name] += 1
+
+                run_url = f"{run_url_base}/{job['run_id']}/attempts/{job['run_attempt']}"
+                if progress_cb:
+                    progress_cb(
+                        f"Flaky: '{job_name}' attempt {job['run_attempt']} "
+                        f"({transition}) {run_url}"
+                    )
+
+                flaky_details.append({
+                    "run_id": job["run_id"],
+                    "run_number": job["run_number"],
+                    "run_attempt": job["run_attempt"],
+                    "run_url": run_url,
+                    "workflow_id": job["workflow_id"],
+                    "workflow": job["workflow"],
+                    "job_name": job_name,
+                    "job_id": job["job_id"],
+                    "sha": job["head_sha"][:8],
+                    "event": job["event"],
+                    "created_at": job["created_at"],
+                    "duration_seconds": job["duration_seconds"],
+                    "transition": transition,
+                    "reason": (
+                        f"Job '{job_name}' on commit {job['head_sha'][:8]}: "
+                        f"attempt {job['run_attempt']} failed, but another "
+                        f"attempt of the same run succeeded ({transition})"
+                    ),
+                })
+
+        # ── Step 4: Energy estimates ────────────────────────────────
+        energy_estimates = []
+        for job in flagged_jobs:
+            dur = job.get("duration_seconds") or 0
+            if dur > 0:
+                energy_estimates.append(
+                    estimate_energy(dur, detect_runner_type(job.get("labels")))
+                )
+
+        # ── Step 5: Stats ───────────────────────────────────────────
+        total_failed_runs = sum(
+            1 for r in runs if r.get("conclusion") == "failure"
+        )
+        total_unique_shas = len(runs_by_sha)
+        flaky_unique_shas = len({j["head_sha"] for j in flagged_jobs})
+
+        top_flaky_jobs = sorted(
+            flaky_job_names.items(), key=lambda x: x[1], reverse=True
+        )
+
+        if progress_cb:
+            progress_cb(
+                f"Flakiness detection complete: {len(flaky_job_names)} flaky "
+                f"job(s) ({len(flagged_jobs)} failure events across "
+                f"{len(top_flaky_jobs)} distinct job names)"
+            )
+
+        # ── Step 6: Build result ────────────────────────────────────
+        summary = {
+            "total_runs_analyzed": len(runs),
+            "total_failed_runs": total_failed_runs,
+            "rerun_runs_inspected": len(rerun_runs),
+            "job_groups_checked": len(job_groups),
+            "flaky_job_failures": len(flaky_job_names),
+            "flaky_failure_events": len(flagged_jobs),
+            "flaky_unique_shas": flaky_unique_shas,
+            "flaky_job_names_count": len(flaky_job_names),
+            "flakiness_rate_of_failures": self._pct(
+                len(flaky_job_names), total_failed_runs
+            ),
+            # "flakiness_rate_of_commits": self._pct(
+            #     flaky_unique_shas, total_unique_shas
+            # ),
+        }
 
         return {
             "analyzer": self.key,
             "title": self.title,
             "summary": summary,
+            "frontend_summary": self._build_frontend_summary(
+                summary, top_flaky_jobs, flaky_details
+            ),
             "energy_waste": aggregate_estimates(energy_estimates),
-            "strict_policy": {
-                "summary": ci_scope_summary,
-                "flaky_runs": {
-                    "count": len(ci_flagged_runs),
-                    "detail": ci_details[:50],
-                },
+            "flaky_runs": {
+                "count": len(flagged_jobs),
+                "detail": flaky_details[:50],
             },
-            "all_events_policy": {
-                "summary": all_scope_summary,
-                "flaky_runs": {
-                    "count": len(all_flagged_runs),
-                    "detail": all_details[:50],
-                },
+            "flaky_jobs": {
+                "top": [
+                    {"job_name": name, "failure_count": count}
+                    for name, count in top_flaky_jobs
+                ],
+                "all_names": sorted(flaky_job_names.keys()),
+            },
+            "rerun_diagnostics": {
+                "total_rerun_runs": len(rerun_runs),
+                "total_job_groups_checked": len(job_groups),
+                "total_flaky_groups": sum(
+                    1
+                    for jl in job_groups.values()
+                    if "failure" in {j["conclusion"] for j in jl}
+                    and "success" in {j["conclusion"] for j in jl}
+                ),
+                "api_calls_made": api_calls,
             },
             "recommendations": self._build_recommendations(
-                ci_scope_summary,
-                all_scope_summary,
+                len(flaky_job_names), total_failed_runs, top_flaky_jobs
             ),
         }
 
-    def _group_by_workflow_and_sha(self, runs):
-        grouped = defaultdict(list)
-        for run in runs:
-            sha = run.get("head_sha")
-            workflow_id = run.get("workflow_id")
-            if not sha or workflow_id is None:
-                continue
+    # ─── Empty result (no reruns found) ───────────────────────────────
 
-            event = run.get("event") or ""
-            head_branch = run.get("head_branch") or ""
-            pr_number = self._extract_pr_number(run)
-            workflow_name = run.get("name") or ""
-            grouped[(workflow_id, workflow_name, sha, event, head_branch, pr_number)].append(run)
-
-        for key in grouped:
-            grouped[key].sort(key=self._sort_key)
-        return grouped
-
-    def _workflow_success_medians(self, runs):
-        success_durations = defaultdict(list)
-        for run in runs:
-            if run.get("conclusion") != "success":
-                continue
-            workflow_id = run.get("workflow_id")
-            if workflow_id is None:
-                continue
-            dur = run_duration(run)
-            if dur > 0:
-                success_durations[workflow_id].append(dur)
-
-        medians = {}
-        for workflow_id, durations in success_durations.items():
-            values = sorted(durations)
-            mid = len(values) // 2
-            if len(values) % 2 == 1:
-                medians[workflow_id] = values[mid]
-            else:
-                medians[workflow_id] = (values[mid - 1] + values[mid]) / 2
-        return medians
-
-    def _detect_flaky_failures(
-        self,
-        owner,
-        repo,
-        grouped,
-        wf_median,
-        nearby_window_hours,
-        apply_short_duration_filter,
-    ):
-        flagged_runs = []
-        details = []
-        groups_fetched_for_jobs = 0
-
-        for (
-            workflow_id,
-            _workflow_name,
-            sha,
-            event,
-            head_branch,
-            pr_number,
-        ), group in grouped.items():
-            conclusions = {run.get("conclusion") for run in group}
-            has_failure = "failure" in conclusions
-            has_success = "success" in conclusions
-            if not has_failure:
-                continue
-
-            job_ctx = {"available": False, "run_failed_jobs": {}, "mixed_job_keys": set()}
-            if has_success and groups_fetched_for_jobs < self.MAX_GROUPS_FOR_JOB_FETCH:
-                candidate_job_ctx = self._build_group_job_context(owner, repo, group)
-                job_ctx = candidate_job_ctx
-                # Only count against the cap if job data was actually retrieved.
-                if candidate_job_ctx.get("available"):
-                    groups_fetched_for_jobs += 1
-
-            for run in group:
-                if run.get("conclusion") != "failure" or run.get("event") == "schedule":
-                    continue
-
-                run_attempt = run.get("run_attempt") or 1
-                nearby_success_ids = (
-                    self._nearby_success_run_ids(group, run, nearby_window_hours)
-                    if has_success
-                    else []
-                )
-                has_nearby_success = bool(nearby_success_ids)
-                signal = self._pick_signal(
-                    group,
-                    run,
-                    workflow_id,
-                    wf_median,
-                    has_success,
-                    has_nearby_success,
-                    job_ctx,
-                )
-                if not signal:
-                    continue
-
-                dur = run_duration(run)
-                median = wf_median.get(workflow_id, 0)
-                if (
-                    apply_short_duration_filter
-                    and median > 0
-                    and dur > 0
-                    and dur < (median * 0.4)
-                ):
-                    # Fast-fail runs are often config/startup issues, not flaky tests.
-                    continue
-
-                detail = {
-                    "run_id": run.get("id"),
-                    "run_number": run.get("run_number"),
-                    "run_attempt": run_attempt,
-                    "workflow_id": workflow_id,
-                    "workflow_name": run.get("name") or "",
-                    "sha": sha[:8],
-                    "event": event,
-                    "head_branch": head_branch,
-                    "pr_number": pr_number,
-                    "signal": signal,
-                    "created_at": run.get("created_at"),
-                    "duration_seconds": round(dur, 1),
-                    "workflow_median_success_seconds": round(median, 1) if median else 0,
-                    "nearby_success_run_ids": nearby_success_ids[:5],
-                    "reason": self._reason(signal),
-                }
-
-                if job_ctx.get("available"):
-                    run_failed_job_keys = job_ctx["run_failed_jobs"].get(run.get("id"), set())
-                    mixed_job_keys = job_ctx.get("mixed_job_keys", set())
-                    detail["failed_job_keys"] = sorted(list(run_failed_job_keys))[:10]
-                    detail["matched_mixed_job_keys"] = sorted(
-                        list(run_failed_job_keys.intersection(mixed_job_keys))
-                    )[:10]
-
-                if signal in ("fail_then_success_distant", "fail_then_success_no_job_data"):
-                    # Keep weaker signals out of strict flaky counts.
-                    continue
-
-                flagged_runs.append(run)
-                details.append(detail)
-
-        return (
-            flagged_runs,
-            details,
-        )
-
-    def _pick_signal(
-        self,
-        group,
-        run,
-        workflow_id,
-        wf_median,
-        has_success,
-        has_nearby_success,
-        job_ctx,
-    ):
-        signal = None
-        run_attempt = run.get("run_attempt") or 1
-
-        if run_attempt > 1:
-            first_attempt = next(
-                (r for r in group if (r.get("run_attempt") or 1) == 1),
-                None,
-            )
-            if first_attempt:
-                first_dur = run_duration(first_attempt)
-                median = wf_median.get(workflow_id, 0)
-                if first_dur > 0 and not (median > 0 and first_dur < (median * 0.3)):
-                    signal = "run_attempt"
-                elif has_success and has_nearby_success:
-                    signal = "fail_then_success"
-            elif has_success and has_nearby_success:
-                signal = "fail_then_success"
-        elif has_success and has_nearby_success:
-            signal = "fail_then_success"
-
-        # When jobs are available, require per-job mixed outcomes for stronger evidence.
-        if signal == "fail_then_success" and job_ctx.get("available"):
-            run_failed_jobs = job_ctx["run_failed_jobs"].get(run.get("id"), set())
-            mixed_job_keys = job_ctx.get("mixed_job_keys", set())
-            if not run_failed_jobs or not any(job in mixed_job_keys for job in run_failed_jobs):
-                signal = None
-        elif signal == "fail_then_success" and not job_ctx.get("available"):
-            signal = "fail_then_success_no_job_data"
-
-        if not signal and has_success and not has_nearby_success:
-            signal = "fail_then_success_distant"
-
-        return signal
-
-    def _build_group_job_context(self, owner, repo, group):
-        run_failed_jobs = {}
-        job_outcomes = defaultdict(set)
-        any_jobs = False
-
-        for run in group:
-            run_id = run.get("id")
-            if run_id is None:
-                continue
-            if not self.client.has_budget(needed=1):
-                break
-
-            try:
-                jobs = self.client.get_jobs_for_run(owner, repo, run_id)
-            except Exception:
-                continue
-
-            if not jobs:
-                continue
-            any_jobs = True
-
-            failed_keys = set()
-            for job in jobs:
-                job_key = self._normalize_job_key(job.get("name") or "")
-                if not job_key:
-                    continue
-                conclusion = job.get("conclusion")
-                if conclusion in ("success", "failure"):
-                    job_outcomes[job_key].add(conclusion)
-                if conclusion == "failure":
-                    failed_keys.add(job_key)
-
-            if failed_keys:
-                run_failed_jobs[run_id] = failed_keys
-
-        mixed_job_keys = {
-            key
-            for key, outcomes in job_outcomes.items()
-            if "success" in outcomes and "failure" in outcomes
+    def _empty_result(self, runs):
+        total_failed = sum(1 for r in runs if r.get("conclusion") == "failure")
+        summary = {
+            "total_runs_analyzed": len(runs),
+            "total_failed_runs": total_failed,
+            "rerun_runs_inspected": 0,
+            "job_groups_checked": 0,
+            "flaky_job_failures": 0,
+            "flaky_unique_shas": 0,
+            "flaky_job_names_count": 0,
+            "flakiness_rate_of_failures": 0.0,
+            # "flakiness_rate_of_commits": 0.0,
         }
         return {
-            "available": any_jobs,
-            "run_failed_jobs": run_failed_jobs,
-            "mixed_job_keys": mixed_job_keys,
+            "analyzer": self.key,
+            "title": self.title,
+            "summary": summary,
+            "frontend_summary": {
+                "status": "clean",
+                "headline": "No reruns detected — nothing to analyze for flakiness",
+                "stats": [
+                    {"label": "Runs analyzed", "value": len(runs)},
+                    {"label": "Reruns found", "value": 0},
+                ],
+                "flaky_jobs": [],
+                "sample_evidence": [],
+            },
+            "energy_waste": aggregate_estimates([]),
+            "flaky_runs": {"count": 0, "detail": []},
+            "flaky_jobs": {"top": [], "all_names": []},
+            "rerun_diagnostics": {},
+            "recommendations": [
+                "No reruns detected. Either CI is stable or reruns are not being used."
+            ],
         }
 
-    @staticmethod
-    def _normalize_job_key(name):
-        return " ".join((name or "").lower().split())
+    # ─── Job fetching ─────────────────────────────────────────────────
 
-    def _nearby_success_run_ids(self, group, failure_run, nearby_window_hours):
-        failure_ts = self._parse_ts(failure_run.get("created_at"))
-        if failure_ts == datetime.min:
-            return []
-
-        # Nearby means within the configured window for the active scope.
-        max_seconds = nearby_window_hours * 3600
-        success_ids = []
-        for run in group:
-            if run.get("conclusion") != "success":
-                continue
-            success_ts = self._parse_ts(run.get("created_at"))
-            if success_ts == datetime.min:
-                continue
-            if abs((failure_ts - success_ts).total_seconds()) <= max_seconds:
-                run_id = run.get("id")
-                if run_id is not None:
-                    success_ids.append(run_id)
-        return success_ids
-
-    @staticmethod
-    def _reason(signal):
-        if signal == "run_attempt":
-            base = "GitHub rerun attempt failed (run_attempt > 1), indicating instability."
-        elif signal == "fail_then_success_no_job_data":
-            base = (
-                "Same commit had mixed workflow outcomes, but job-level data was unavailable "
-                "(kept as potential signal, not strict flakiness)."
+    def _fetch_jobs_for_attempt(self, owner, repo, run_id, attempt):
+        """
+        Fetch jobs for a specific attempt of a workflow run.
+        Always uses the explicit /attempts/{n}/jobs endpoint to avoid
+        the filter=latest default on /runs/{id}/jobs.
+        """
+        try:
+            url = (
+                f"/repos/{owner}/{repo}/actions/runs/{run_id}"
+                f"/attempts/{attempt}/jobs"
             )
-        elif signal == "fail_then_success_distant":
-            base = (
-                "Same commit had mixed outcomes, but the matching success is not temporally close "
-                "(likely PR lifecycle/process-trigger effect)."
+            resp = self.client._get_json(url, params={"per_page": 100})
+            if resp and "jobs" in resp:
+                return resp["jobs"]
+        except Exception:
+            pass
+        return []
+
+    @staticmethod
+    def _job_duration(job):
+        """Calculate job duration in seconds."""
+        started = job.get("started_at")
+        completed = job.get("completed_at")
+        if not started or not completed:
+            return 0
+        try:
+            from datetime import datetime
+
+            fmt = "%Y-%m-%dT%H:%M:%SZ"
+            start_dt = datetime.strptime(started, fmt)
+            end_dt = datetime.strptime(completed, fmt)
+            return max(0, int((end_dt - start_dt).total_seconds()))
+        except Exception:
+            return 0
+
+    # ─── Frontend summary ─────────────────────────────────────────────
+
+    def _build_frontend_summary(self, summary, top_flaky_jobs, flaky_details):
+        """
+        Structured block for the frontend to render directly.
+
+        Returns:
+          status: "clean" | "warning" | "critical"
+          headline: one-line summary
+          stats: [{label, value}, ...] for cards
+          flaky_jobs: [{name, failures}, ...] for table
+          sample_evidence: [{sha, job, attempt, transition, reason}, ...]
+        """
+        flaky_count = summary["flaky_job_failures"]
+        flakiness_rate = summary["flakiness_rate_of_failures"]
+
+        if flaky_count == 0:
+            status = "clean"
+            headline = "No flaky tests detected — CI is stable"
+        elif flakiness_rate > 20:
+            status = "critical"
+            headline = (
+                f"{flaky_count} flaky job failure(s) — "
+                f"{flakiness_rate}% of all failures are non-deterministic"
             )
         else:
-            base = (
-                "Same commit had mixed outcomes (both failure and success) in the "
-                "same workflow, indicating non-deterministic behavior."
+            status = "warning"
+            headline = (
+                f"{flaky_count} flaky job failure(s) — "
+                f"same code passes and fails across rerun attempts"
             )
-        return base
 
-    @staticmethod
-    def _extract_pr_number(run):
-        prs = run.get("pull_requests") or []
-        if not prs:
-            return None
-        return (prs[0] or {}).get("number")
+        stats = [
+            {"label": "Runs analyzed", "value": summary["total_runs_analyzed"]},
+            {"label": "Reruns inspected", "value": summary["rerun_runs_inspected"]},
+            {"label": "Job groups checked", "value": summary["job_groups_checked"]},
+            {"label": "Flaky job failures", "value": flaky_count},
+            {"label": "Distinct flaky jobs", "value": summary["flaky_job_names_count"]},
+            {"label": "Flakiness rate", "value": f"{flakiness_rate}%"},
+            {"label": "Commits affected", "value": summary["flaky_unique_shas"]},
+        ]
 
-    @staticmethod
-    def _parse_ts(ts):
-        if not ts:
-            return datetime.min
-        try:
-            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        except Exception:
-            return datetime.min
+        flaky_jobs_table = [
+            {"name": name, "failures": count}
+            for name, count in top_flaky_jobs[:10]
+        ]
 
-    def _sort_key(self, run):
-        return (
-            run.get("run_number") or 0,
-            run.get("run_attempt") or 1,
-            self._parse_ts(run.get("created_at")),
-        )
+        # Deduplicated evidence samples from flaky_details (which has
+        # transition and reason already populated).
+        seen = set()
+        sample_evidence = []
+        for detail in flaky_details[:20]:
+            key = (detail["sha"], detail["job_name"])
+            if key in seen:
+                continue
+            seen.add(key)
+            sample_evidence.append({
+                "sha": detail["sha"],
+                "job": detail["job_name"],
+                "failed_in_run": detail["run_id"],
+                "run_url": detail["run_url"],
+                "attempt": detail["run_attempt"],
+                "transition": detail["transition"],
+                "reason": detail["reason"],
+            })
+            if len(sample_evidence) >= 5:
+                break
 
-    def _get_default_branch(self, owner, repo):
-        try:
-            if not self.client.has_budget():
-                return None
+        return {
+            "status": status,
+            "headline": headline,
+            "stats": stats,
+            "flaky_jobs": flaky_jobs_table,
+            "sample_evidence": sample_evidence,
+        }
 
-            url = f"https://api.github.com/repos/{owner}/{repo}"
-            response = self.client.get(url)
-            if not response or response.status_code != 200:
-                return None
-
-            data = (
-                response.json()
-                if hasattr(response, "json")
-                else response.get("repository", {})
-            )
-            return data.get("default_branch", "main")
-        except Exception:
-            return None
-
-    @staticmethod
-    def _filter_ci_runs(runs, default_branch):
-        ci_runs = []
-        for run in runs:
-            event = run.get("event")
-            if event == "pull_request":
-                ci_runs.append(run)
-            elif event == "push" and default_branch and run.get("head_branch") == default_branch:
-                ci_runs.append(run)
-            elif event == "push" and not default_branch:
-                ci_runs.append(run)
-        return ci_runs
-
-    @staticmethod
-    def _count_unique_shas(runs):
-        return len({run.get("head_sha") for run in runs if run.get("head_sha")})
+    # ─── Helpers ──────────────────────────────────────────────────────
 
     @staticmethod
     def _pct(part, total):
@@ -505,48 +441,33 @@ class FlakinessAnalyzer:
             return 0.0
         return round((part / total) * 100, 1)
 
-    def _build_scope_summary(
-        self,
-        scope_runs,
-        flagged_runs,
-        details,
-    ):
-        total_failed_runs = sum(1 for run in scope_runs if run.get("conclusion") == "failure")
-        total_unique_shas = self._count_unique_shas(scope_runs)
-        flaky_unique_shas = self._count_unique_shas(flagged_runs)
-
-        return {
-            "runs_analyzed": len(scope_runs),
-            "total_failed_runs": total_failed_runs,
-            "flaky_failures": len(flagged_runs),
-            "flaky_unique_shas": flaky_unique_shas,
-            "flakiness_rate_of_failures": self._pct(len(flagged_runs), total_failed_runs),
-            "flakiness_rate_of_commits": self._pct(flaky_unique_shas, total_unique_shas),
-            "rerun_failures": sum(1 for d in details if d.get("signal") == "run_attempt"),
-            "fail_then_success_failures": sum(
-                1 for d in details if d.get("signal") == "fail_then_success"
-            ),
-        }
-
     @staticmethod
-    def _build_recommendations(strict_summary, all_events_summary):
-        strict_flaky = strict_summary.get("flaky_failures", 0)
-        all_flaky = all_events_summary.get("flaky_failures", 0)
+    def _build_recommendations(flaky_count, total_failures, top_flaky_jobs=None):
+        if flaky_count == 0:
+            return ["No flaky builds detected. CI appears stable."]
 
-        if strict_flaky == 0 and all_flaky == 0:
-            return [
-                "No flaky behavior detected in either strict CI scope or all-events scope. Well done.",
-            ]
-
-        recommendations = [
-            "Enable selective retries for known flaky tests instead of rerunning full workflows.",
-            "Quarantine and stabilize top flaky test files based on repeated mixed-outcome commit patterns.",
-            "Use tighter dependency pinning and deterministic test seeds to reduce run-to-run variance.",
+        recs = [
+            "Quarantine and fix top flaky test cases — they pass and fail on identical code.",
+            "Add deterministic seeding and clock-stable timeouts to reduce environment-dependent failures.",
+            "Use per-job retries (rather than full workflow reruns) to limit wasted compute.",
         ]
 
-        if strict_flaky == 0 and all_flaky > 0:
-            recommendations.append(
-                "No strict CI flakiness detected, but all-events mode found flaky behavior; review non-PR/push automation workflows before changing primary reporting metrics."
+        flakiness_pct = (
+            (flaky_count / total_failures * 100) if total_failures > 0 else 0
+        )
+        if flakiness_pct > 20:
+            recs.insert(
+                0,
+                f"URGENT: {flakiness_pct:.1f}% of failures are flaky. "
+                f"Prioritize test suite stabilization.",
             )
 
-        return recommendations
+        if top_flaky_jobs:
+            worst_name, worst_count = top_flaky_jobs[0]
+            recs.append(
+                f"Start with job '{worst_name}' — it failed {worst_count} "
+                f"time(s) on commits where it also passed."
+            )
+
+        return recs
+

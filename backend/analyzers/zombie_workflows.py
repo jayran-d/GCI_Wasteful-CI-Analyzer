@@ -18,7 +18,7 @@ Detection layers:
 
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from energy import estimate_energy, aggregate_estimates, detect_runner_type
+from energy import estimate_energy, aggregate_estimates
 from utils import run_duration
 
 
@@ -69,9 +69,27 @@ class ZombieWorkflowAnalyzer:
     def analyze(self, owner, repo, runs, progress_cb=None):
         self._cb = progress_cb
         self._status = progress_cb or (lambda msg: None)
+        self._run_url = f"https://github.com/{owner}/{repo}/actions/runs"
+
+        # Fetch default branch so blob URLs always work (master vs main etc.)
+        default_branch = "main"
+        try:
+            repo_data = self.client._get_json(f"/repos/{owner}/{repo}")
+            default_branch = repo_data.get("default_branch", "main")
+        except Exception:
+            pass
+        self._blob_url = f"https://github.com/{owner}/{repo}/blob/{default_branch}"
 
         scheduled_runs = [r for r in runs if r.get("event") == "schedule"]
         all_failed = [r for r in runs if r.get("conclusion") == "failure"]
+
+        # Build workflow_id -> full path lookup from runs
+        self._wf_path = {}
+        for r in runs:
+            wf_id = r.get("workflow_id")
+            path = r.get("path", "")
+            if wf_id and path and wf_id not in self._wf_path:
+                self._wf_path[wf_id] = path
 
         self._status(
             f"Analyzing {len(runs)} runs ({len(scheduled_runs)} scheduled, "
@@ -82,16 +100,33 @@ class ZombieWorkflowAnalyzer:
         self._status("Detecting zombie scheduled workflows (high failure rate)...")
         zombies = self._detect_zombie_scheduled(scheduled_runs)
         self._status(f"→ {len(zombies)} zombie workflows found")
+        for z in zombies:
+            wf_id = z.get("workflow_id")
+            path = self._wf_path.get(wf_id, "")
+            wf_link = f" {self._blob_url}/{path}" if path else ""
+            self._status(f"  ↳ '{z['workflow_name']}' — {z['failed_runs']}/{z['total_scheduled_runs']} failures ({z['failure_rate']}%){wf_link}")
+            for rid in z.get("failed_run_ids", []):
+                self._status(f"    failed run #{rid} {self._run_url}/{rid}")
 
         # --- Layer 2: Long consecutive failure streaks ---
         self._status("Scanning for long consecutive failure streaks...")
         streaks = self._detect_failure_streaks(scheduled_runs)
         self._status(f"→ {len(streaks)} long failure streaks found")
+        for s in streaks:
+            wf_id = s.get("workflow_id")
+            path = self._wf_path.get(wf_id, "")
+            wf_link = f" {self._blob_url}/{path}" if path else ""
+            tag = ""
+            self._status(f"  ↳ '{s['workflow_name']}' — {s['consecutive_failures']} consecutive failures over {s['streak_days']} days{tag}{wf_link}")
+            for rid in s.get("run_ids", []):
+                self._status(f"    failed run #{rid} {self._run_url}/{rid}")
 
         # --- Layer 3: Deprecated runner detection ---
         self._status("Checking for deprecated runner configurations...")
         deprecated = self._detect_deprecated_runners(owner, repo, runs)
         self._status(f"→ {len(deprecated)} workflows with deprecated configs")
+        for d in deprecated:
+            self._status(f"  ↳ '{d['workflow_name']}' uses '{d['runner_label']}' {self._run_url}/{d['run_id']}")
 
         # --- Layer 4: Deep scan workflow files for deprecated patterns ---
         deprecated_configs = []
@@ -99,6 +134,10 @@ class ZombieWorkflowAnalyzer:
             self._status("Scanning workflow YAML files for outdated patterns...")
             deprecated_configs = self._scan_workflow_files(owner, repo)
             self._status(f"→ {len(deprecated_configs)} deprecated config patterns found")
+            for dc in deprecated_configs:
+                path = dc.get("file_path", "")
+                wf_link = f" {self._blob_url}/{path}" if path else ""
+                self._status(f"  ↳ '{dc['workflow_name']}' uses '{dc['pattern']}'{wf_link}")
 
         # --- Compute energy waste ---
         self._status("Computing energy waste from zombie workflows...")
@@ -114,7 +153,7 @@ class ZombieWorkflowAnalyzer:
                 dur = run_duration(r)
                 if dur > 0:
                     energy_estimates.append(
-                        estimate_energy(dur, detect_runner_type(r.get("labels")))
+                        estimate_energy(dur, "linux")
                     )
 
         # Compute total wasted time
@@ -141,6 +180,9 @@ class ZombieWorkflowAnalyzer:
                 "longest_streak_days": max(
                     (s.get("streak_days", 0) for s in streaks), default=0
                 ),
+                "waste_percentage": round(
+                    len(flagged_run_ids) / len(runs) * 100, 1
+                ) if len(zombies) > 0 else 0,
                 "total_wasted_days": round(total_wasted_days, 1),
                 "deprecated_configs_found": len(deprecated) + len(deprecated_configs),
             },

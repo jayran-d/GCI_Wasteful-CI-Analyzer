@@ -1,0 +1,86 @@
+{
+  "CARBON_INTENSITY_G_PER_KWH": 320.21,
+  "lower_bound_g_per_kwh": 195.05,
+  "upper_bound_g_per_kwh": 472.88,
+  "methodology": "Equal weight across 11 confirmed GitHub runner Azure regions",
+  "data_sources": {
+    "US_regions": "EPA eGRID2023 Revision 2, published June 2025",
+    "EU_regions": "Ember European Electricity Review 2024 (2023 data)"
+  },
+  "regions": {
+    "eastus": {
+      "carbon_intensity_g_per_kwh": 270.48,
+      "weight": 0.090909,
+      "source": "EPA eGRID2023 Rev2 (SRVC - SERC Virginia/Carolina)",
+      "raw_lb_mwh": 596.3,
+      "data_year": 2023
+    },
+    "eastus2": {
+      "carbon_intensity_g_per_kwh": 270.48,
+      "weight": 0.090909,
+      "source": "EPA eGRID2023 Rev2 (SRVC - SERC Virginia/Carolina)",
+      "raw_lb_mwh": 596.3,
+      "data_year": 2023
+    },
+    "centralus": {
+      "carbon_intensity_g_per_kwh": 420.31,
+      "weight": 0.090909,
+      "source": "EPA eGRID2023 Rev2 (MROW - MRO West)",
+      "raw_lb_mwh": 926.6,
+      "data_year": 2023
+    },
+    "northcentralus": {
+      "carbon_intensity_g_per_kwh": 415.54,
+      "weight": 0.090909,
+      "source": "EPA eGRID2023 Rev2 (RFCW - RFC West)",
+      "raw_lb_mwh": 916.1,
+      "data_year": 2023
+    },
+    "southcentralus": {
+      "carbon_intensity_g_per_kwh": 334.12,
+      "weight": 0.090909,
+      "source": "EPA eGRID2023 Rev2 (ERCT - ERCOT All)",
+      "raw_lb_mwh": 736.6,
+      "data_year": 2023
+    },
+    "westcentralus": {
+      "carbon_intensity_g_per_kwh": 472.88,
+      "weight": 0.090909,
+      "source": "EPA eGRID2023 Rev2 (RMPA - WECC Rockies)",
+      "raw_lb_mwh": 1042.5,
+      "data_year": 2023
+    },
+    "westus": {
+      "carbon_intensity_g_per_kwh": 195.05,
+      "weight": 0.090909,
+      "source": "EPA eGRID2023 Rev2 (CAMX - WECC California)",
+      "raw_lb_mwh": 430,
+      "data_year": 2023
+    },
+    "westus2": {
+      "carbon_intensity_g_per_kwh": 288.17,
+      "weight": 0.090909,
+      "source": "EPA eGRID2023 Rev2 (NWPP - WECC Northwest)",
+      "raw_lb_mwh": 635.3,
+      "data_year": 2023
+    },
+    "westus3": {
+      "carbon_intensity_g_per_kwh": 320.33,
+      "weight": 0.090909,
+      "source": "EPA eGRID2023 Rev2 (AZNM - WECC Southwest)",
+      "data_year": 2023
+    },
+    "westeurope": {
+      "carbon_intensity_g_per_kwh": 270,
+      "weight": 0.090909,
+      "source": "Ember European Electricity Review 2024 (Netherlands, 2023 data)",
+      "data_year": 2023
+    },
+    "northeurope": {
+      "carbon_intensity_g_per_kwh": 265,
+      "weight": 0.090909,
+      "source": "Ember European Electricity Review 2024 (Ireland, 2023 data)",
+      "data_year": 2023
+    }
+  }
+}

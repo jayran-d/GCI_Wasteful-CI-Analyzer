@@ -14,7 +14,7 @@ Layers:
 
 import yaml
 from collections import defaultdict
-from energy import estimate_energy, aggregate_estimates, detect_runner_type
+from energy import estimate_energy, aggregate_estimates
 from utils import get_run_duration_from_jobs
 
 
@@ -73,14 +73,13 @@ class WorkflowDependencyAnalyzer:
             dur_child = get_run_duration_from_jobs(jobs)
             jobs = self.client.get_jobs_for_run(owner, repo, r["parent"]["run_id"])
             dur_parent = get_run_duration_from_jobs(jobs)
-            print(f"Child run {r['child_run_id']} duration: {dur_child}s, Parent run {r['parent']['run_id']} duration: {dur_parent}s")
             if dur_child > 0:
                 energy_estimates.append(
-                    estimate_energy(dur_child, detect_runner_type(r.get("labels")))
+                    estimate_energy(dur_child, "linux")
                 )
             if dur_parent > 0:
                 energy_estimates.append(
-                    estimate_energy(dur_parent, detect_runner_type(r["parent"].get("labels", [])))
+                    estimate_energy(dur_parent, "linux")
                 )
 
         return {
@@ -128,7 +127,10 @@ class WorkflowDependencyAnalyzer:
         for wf in all_workflows:
             wf_path = wf.get("path", "")
             raw_yaml = self.client.get_workflow_file(owner, repo, wf_path)
-
+            if raw_yaml is None:
+                if progress_cb:
+                    progress_cb(f"  ↳ Could not fetch {wf_path}, skipping")
+                continue
             try:
                 parsed = yaml.safe_load(raw_yaml)
             except yaml.YAMLError as exc:
@@ -300,7 +302,6 @@ class WorkflowDependencyAnalyzer:
                     "failed_jobs":      failed_jobs,
                     "flakiness_reason": reason,
                 })
-                print("labels:", parent_info.get("labels", []) if parent_info else [])
                 if progress_cb:
                     progress_cb(f"  ↳ Cascade failure: '{child_wf_name}' run #{child_run.get('run_number')} ({child_conclusion}) {child_run_url or ''}")
                     progress_cb(f"  ↳ Parent '{parent_info.get('name') if parent_info else 'unknown'}' run #{parent_info.get('run_number') if parent_info else '?'} ({parent_conclusion}) {parent_run_url or ''}")
@@ -335,7 +336,6 @@ class WorkflowDependencyAnalyzer:
                 "log_preview":  log_info["log_preview"]      if log_info else None,
                 "labels":       job.get("labels", []),
             })
-            print(f"labels for failed job {job.get('id')}: {job.get('labels', [])}")
         return failed_jobs
 
     @staticmethod

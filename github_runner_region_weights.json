@@ -1,0 +1,51 @@
+{
+  "total_ips_matched": 25264431,
+  "regions_matched": 11,
+  "unmatched_cidrs": 9,
+  "region_weights": {
+    "eastus": {
+      "ip_count": 4728276,
+      "weight": 0.187151
+    },
+    "westeurope": {
+      "ip_count": 4581878,
+      "weight": 0.181357
+    },
+    "eastus2": {
+      "ip_count": 3537626,
+      "weight": 0.140024
+    },
+    "northeurope": {
+      "ip_count": 2297042,
+      "weight": 0.09092
+    },
+    "centralus": {
+      "ip_count": 2119792,
+      "weight": 0.083904
+    },
+    "westus": {
+      "ip_count": 2085658,
+      "weight": 0.082553
+    },
+    "westus2": {
+      "ip_count": 1892623,
+      "weight": 0.074913
+    },
+    "southcentralus": {
+      "ip_count": 1623682,
+      "weight": 0.064268
+    },
+    "westus3": {
+      "ip_count": 967860,
+      "weight": 0.038309
+    },
+    "northcentralus": {
+      "ip_count": 940440,
+      "weight": 0.037224
+    },
+    "westcentralus": {
+      "ip_count": 489554,
+      "weight": 0.019377
+    }
+  }
+}

@@ -1,4 +1,4 @@
-from energy import estimate_energy, aggregate_estimates, detect_runner_type
+from energy import estimate_energy, aggregate_estimates
 from utils import run_duration
 
 
@@ -14,6 +14,7 @@ class InefficientTriggerAnalyzer:
         self.client = client
 
     def analyze(self, owner, repo, runs, deep_scan=True, progress_cb=None):
+        self._run_url = f"https://github.com/{owner}/{repo}/actions/runs"
         ci_runs = [
             run for run in runs
             if run.get("event") in ("push", "pull_request")
@@ -71,7 +72,7 @@ class InefficientTriggerAnalyzer:
                 energy_estimates.append(
                     estimate_energy(
                         duration_seconds,
-                        detect_runner_type(run.get("labels", []))
+                        "linux"
                     )
                 )
 
@@ -80,6 +81,11 @@ class InefficientTriggerAnalyzer:
 
         if progress_cb:
             progress_cb(f"Found {inefficient_count} likely inefficient run(s).")
+            for d in inefficient_detail[:10]:
+                progress_cb(
+                    f"  ↳ '{d['workflow']}' on docs-only commit {d['sha']} "
+                    f"{self._run_url}/{d['run_id']}"
+                )
 
         return {
             "analyzer": self.key,
