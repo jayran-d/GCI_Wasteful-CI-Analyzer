@@ -2,10 +2,7 @@
 Energy, carbon, and cost estimation for GitHub Actions runners.
 
 Methodology:
-  - Carbon intensity: IP-weighted average across 11 confirmed GitHub Actions
-    Azure regions. Weights derived from GitHub's published Actions IP ranges
-    (api.github.com/meta) cross-referenced with Azure Service Tags.
-    Region-level emission factors from:
+  - Region-level emission factors from:
       * US: EPA eGRID2023 Revision 2 (June 2025) -- location-based factors
         per GHG Protocol Corporate Standard, Chapter 6 s6.7
       * EU: Ember European Electricity Review 2024 (2023 data)
@@ -54,19 +51,19 @@ CARBON_INTENSITY_UPPER = max(ci for ci, _ in REGION_CARBON_INTENSITY.values())  
 # Power per runner (watts)
 # Base: 3.5W per vCPU at CI-load x PUE 1.125 (Azure published average)
 # ---------------------------------------------------------------------------
-_W_PER_VCPU = 3.5
-_PUE = 1.125
+_W_PER_VCPU = 3.57
+
 
 RUNNER_POWER_W = {
-    "linux":              round( 2 * _W_PER_VCPU * _PUE, 2),  # 7.88W  (ubuntu-latest, 2-core)
-    "linux_4_core":       round( 4 * _W_PER_VCPU * _PUE, 2),
-    "linux_8_core":       round( 8 * _W_PER_VCPU * _PUE, 2),
-    "linux_16_core":      round(16 * _W_PER_VCPU * _PUE, 2),
-    "linux_32_core":      round(32 * _W_PER_VCPU * _PUE, 2),
-    "linux_64_core":      round(64 * _W_PER_VCPU * _PUE, 2),
-    "windows":            round( 2 * _W_PER_VCPU * _PUE, 2),
-    "macos":              round( 3 * _W_PER_VCPU * _PUE, 2),  # 3-core M1
-    "default":            round( 2 * _W_PER_VCPU * _PUE, 2),
+    "linux":              round( 2 * _W_PER_VCPU, 2),  # 7.88W  (ubuntu-latest, 2-core)
+    "linux_4_core":       round( 4 * _W_PER_VCPU, 2),
+    "linux_8_core":       round( 8 * _W_PER_VCPU, 2),
+    "linux_16_core":      round(16 * _W_PER_VCPU, 2),
+    "linux_32_core":      round(32 * _W_PER_VCPU, 2),
+    "linux_64_core":      round(64 * _W_PER_VCPU, 2),
+    "windows":            round( 2 * _W_PER_VCPU , 2),
+    "macos":              round( 3 * _W_PER_VCPU , 2),  
+    "default":            round( _W_PER_VCPU , 2),
 }
 
 # ---------------------------------------------------------------------------
@@ -179,7 +176,6 @@ def aggregate_estimates(estimates: list[EnergyEstimate]) -> dict:
         "carbon_intensity_range": [CARBON_INTENSITY_LOWER, CARBON_INTENSITY_UPPER],
         "weighting": "Equal weight across 11 GitHub Actions Azure regions",
         "power_per_vcpu_w": _W_PER_VCPU,
-        "pue": _PUE,
         "sources": [
             "EPA eGRID2023 Rev2 (US regions)",
             "Ember European Electricity Review 2024 (EU regions)",
