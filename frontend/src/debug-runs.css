@@ -1,0 +1,207 @@
+/* ──── Debug Runs Panel ──── */
+
+.debug-runs-panel {
+  margin-top: 12px;
+  border: 1px solid rgba(99, 115, 139, 0.25);
+  border-radius: 8px;
+  background: rgba(15, 20, 32, 0.5);
+  overflow: hidden;
+}
+
+.debug-runs-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.debug-runs-toggle:hover {
+  background: rgba(99, 115, 139, 0.1);
+}
+
+.debug-runs-icon {
+  font-size: 14px;
+}
+
+.debug-runs-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8b98a8;
+  letter-spacing: 0.02em;
+}
+
+.debug-linked-count {
+  color: #5b9cf5;
+}
+
+.debug-runs-chevron {
+  margin-left: auto;
+  font-size: 11px;
+  color: #6b7a8d;
+}
+
+.debug-runs-body {
+  border-top: 1px solid rgba(99, 115, 139, 0.15);
+}
+
+.debug-filter-bar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px;
+  background: rgba(15, 20, 32, 0.4);
+  border-bottom: 1px solid rgba(99, 115, 139, 0.1);
+}
+
+.debug-filter-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #6b7a8d;
+  background: transparent;
+  border: 1px solid rgba(99, 115, 139, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.debug-filter-btn:hover {
+  color: #a0aab8;
+  border-color: rgba(99, 115, 139, 0.4);
+}
+
+.debug-filter-btn.active {
+  color: #c5cdd8;
+  background: rgba(91, 156, 245, 0.12);
+  border-color: rgba(91, 156, 245, 0.4);
+}
+
+.debug-runs-list {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.debug-runs-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.debug-runs-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.debug-runs-list::-webkit-scrollbar-thumb {
+  background: rgba(99, 115, 139, 0.3);
+  border-radius: 3px;
+}
+
+.debug-runs-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #5a6878;
+  background: rgba(15, 20, 32, 0.6);
+  border-bottom: 1px solid rgba(99, 115, 139, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.debug-col-status { width: 36px; text-align: center; flex-shrink: 0; }
+.debug-col-id { width: 110px; flex-shrink: 0; }
+.debug-col-name { flex: 1; min-width: 0; }
+.debug-col-branch { width: 120px; flex-shrink: 0; }
+.debug-col-link { width: 32px; text-align: center; flex-shrink: 0; }
+
+.debug-run-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid rgba(99, 115, 139, 0.07);
+  transition: background 0.12s;
+}
+
+.debug-run-row:hover {
+  background: rgba(99, 115, 139, 0.08);
+}
+
+.debug-row-linked {
+  background: rgba(91, 156, 245, 0.05);
+  border-left: 2px solid rgba(91, 156, 245, 0.4);
+}
+
+.debug-row-linked:hover {
+  background: rgba(91, 156, 245, 0.1);
+}
+
+.debug-run-row:last-child {
+  border-bottom: none;
+}
+
+.debug-run-status {
+  width: 36px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.status-ok { color: #34d399; }
+.status-fail { color: #f07a6e; }
+.status-other { color: #6b7a8d; }
+
+.debug-run-id {
+  width: 110px;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  color: #a0aab8;
+}
+
+.debug-run-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #c5cdd8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.debug-run-branch {
+  width: 120px;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: #6b7a8d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.debug-run-link {
+  width: 32px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 14px;
+  color: #5b9cf5;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.debug-run-link:hover {
+  color: #8bb8f8;
+}
+
+.debug-empty {
+  padding: 20px 14px;
+  text-align: center;
+  font-size: 12px;
+  color: #5a6878;
+}

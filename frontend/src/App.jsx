@@ -48,6 +48,7 @@ export default function App() {
   const [analyzers, setAnalyzers] = useState({})
   const [analyzerOrder, setAnalyzerOrder] = useState([])
   const [grandTotal, setGrandTotal] = useState(null)
+  const [allRuns, setAllRuns] = useState([])
 
   const handleEvent = (msg) => {
     const ev = msg.event
@@ -60,6 +61,7 @@ export default function App() {
     if (ev === 'warning') setError(prev => prev ? prev + '\n' + msg.message : msg.message)
     if (ev === 'runs_page') {
       setFetchProgress({ fetched: msg.fetched_so_far, total: msg.total_available, page: msg.page })
+      if (msg.runs) setAllRuns(prev => [...prev, ...msg.runs])
       if (msg.rate_remaining != null) setRateInfo(prev => prev ? { ...prev, remaining: msg.rate_remaining } : { remaining: msg.rate_remaining, limit: '?' })
     }
     if (ev === 'runs_complete') { setStep(2); setFetchDone(true); setWorkflows(msg.workflows || []); setEventBreakdown(msg.event_breakdown || {}) }
@@ -103,6 +105,7 @@ export default function App() {
     setPhase('analysis'); setStep(0); setError(null)
     setFetchProgress({ fetched: 0, total: 0, page: 0 }); setFetchDone(false)
     setWorkflows([]); setAnalyzers({}); setAnalyzerOrder([]); setGrandTotal(null)
+    setAllRuns([])
     try {
       const resp = await fetch(API + '/api/analyze/stream', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -183,7 +186,8 @@ export default function App() {
       {step >= 1 && <FetchProgress progress={fetchProgress} done={fetchDone} />}
       {step >= 2 && <WorkflowTable workflows={workflows} events={eventBreakdown} />}
       {analyzerOrder.map(key => (
-        <AnalyzerCard key={key} id={key} data={analyzers[key]} repo={repo} token={token} geminiKey={geminiKey} />
+        <AnalyzerCard key={key} id={key} data={analyzers[key]} repo={repo} token={token} geminiKey={geminiKey}
+          repoLabel={repoLabel} allRuns={allRuns} />
       ))}
       {grandTotal && <Report grandTotal={grandTotal} analyzers={analyzers} order={analyzerOrder} />}
       {grandTotal && (
@@ -260,7 +264,7 @@ function WorkflowTable({ workflows, events }) {
   )
 }
 
-function AnalyzerCard({ id, data, repo, token, geminiKey }) {
+function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) {
   const [open, setOpen] = useState(true)
   const logRef = useRef(null)
   const meta = ANALYZER_META[id] || { icon: '🔍', color: '#6b7a8d', glow: 'rgba(107,122,141,0.3)' }
@@ -298,6 +302,8 @@ function AnalyzerCard({ id, data, repo, token, geminiKey }) {
     }
     scan(data.result)
   }
+
+  const linkedRunIdSet = new Set(failedRunIds)
 
   // Build analyzer context to pass to AI diagnosis
   const analyzerContext = data.result && !data.result.error ? {
@@ -343,6 +349,16 @@ function AnalyzerCard({ id, data, repo, token, geminiKey }) {
                   <div className="metric highlight"><div className="metric-val">${fmt3(e.total_cost_usd)}</div><div className="metric-lbl">est. cost</div></div>
                 </>}
               </div>
+
+              {/* ─── Debug Runs Panel ─── */}
+              {allRuns.length > 0 && repoLabel && (
+                <DebugRunsPanel
+                  allRuns={allRuns}
+                  linkedRunIds={linkedRunIdSet}
+                  repoLabel={repoLabel}
+                />
+              )}
+
               {geminiKey && failedRunIds.length > 0 && (
                 <AIDiagnosePanel
                   repo={repo}
@@ -366,6 +382,86 @@ function AnalyzerCard({ id, data, repo, token, geminiKey }) {
               <DetailTables result={data.result} />
             </>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ──── Debug Runs Panel ──── */
+
+function DebugRunsPanel({ allRuns, linkedRunIds, repoLabel }) {
+  const [open, setOpen] = useState(false)
+  const [filter, setFilter] = useState('all')
+
+  const failedCount = allRuns.filter(r => r.conclusion === 'failure').length
+  const successCount = allRuns.filter(r => r.conclusion === 'success').length
+
+  const filtered = allRuns.filter(r => {
+    if (filter === 'linked') return linkedRunIds.has(r.id)
+    if (filter === 'failed') return r.conclusion === 'failure'
+    if (filter === 'success') return r.conclusion === 'success'
+    return true
+  })
+
+  return (
+    <div className="debug-runs-panel">
+      <div className="debug-runs-toggle" onClick={() => setOpen(!open)}>
+        <span className="debug-runs-icon">🔍</span>
+        <span className="debug-runs-label">
+          Debug: {allRuns.length} fetched runs
+          {linkedRunIds.size > 0 && <span className="debug-linked-count"> · {linkedRunIds.size} linked to this analyzer</span>}
+        </span>
+        <span className="debug-runs-chevron">{open ? '▾' : '▸'}</span>
+      </div>
+      {open && (
+        <div className="debug-runs-body">
+          <div className="debug-filter-bar">
+            {[
+              ['all', `All (${allRuns.length})`],
+              ['linked', `Linked (${linkedRunIds.size})`],
+              ['failed', `Failed (${failedCount})`],
+              ['success', `Success (${successCount})`],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                className={`debug-filter-btn ${filter === key ? 'active' : ''}`}
+                onClick={() => setFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="debug-runs-list">
+            <div className="debug-runs-header">
+              <span className="debug-col-status">Status</span>
+              <span className="debug-col-id">Run ID</span>
+              <span className="debug-col-name">Workflow</span>
+              <span className="debug-col-branch">Branch</span>
+              <span className="debug-col-link">Link</span>
+            </div>
+            {filtered.map((r) => (
+              <div key={r.id} className={`debug-run-row ${linkedRunIds.has(r.id) ? 'debug-row-linked' : ''}`}>
+                <span className={`debug-run-status ${r.conclusion === 'success' ? 'status-ok' : r.conclusion === 'failure' ? 'status-fail' : 'status-other'}`}>
+                  {r.conclusion === 'success' ? '✓' : r.conclusion === 'failure' ? '✗' : '●'}
+                </span>
+                <span className="debug-run-id">#{r.id}</span>
+                <span className="debug-run-name" title={r.name}>{r.name}</span>
+                <span className="debug-run-branch" title={r.head_branch}>{r.head_branch || '—'}</span>
+                <a
+                  className="debug-run-link"
+                  href={r.html_url || `https://github.com/${repoLabel}/actions/runs/${r.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  ↗
+                </a>
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div className="debug-empty">No runs match this filter</div>
+            )}
+          </div>
         </div>
       )}
     </div>

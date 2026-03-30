@@ -132,7 +132,7 @@ def analyze_stream():
         all_runs = []
         try:
             for page_num, page_runs, total_count in client.get_workflow_runs_paged(
-                owner, repo, created=created, max_pages=3
+                owner, repo, created=created, max_runs=150
             ):
                 all_runs.extend(page_runs)
                 yield _sse("runs_page", {
@@ -141,6 +141,17 @@ def analyze_stream():
                     "fetched_so_far": len(all_runs),
                     "total_available": total_count,
                     "rate_remaining": client.rate_remaining,
+                    "runs": [
+                        {
+                            "id": r.get("id"),
+                            "name": r.get("name", "unknown"),
+                            "conclusion": r.get("conclusion"),
+                            "html_url": r.get("html_url"),
+                            "created_at": r.get("created_at"),
+                            "head_branch": r.get("head_branch"),
+                        }
+                        for r in page_runs
+                    ],
                 })
         except Exception as e:
             yield _sse("error", {"message": f"GitHub API error: {e}"})

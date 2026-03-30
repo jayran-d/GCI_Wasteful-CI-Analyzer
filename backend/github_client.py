@@ -195,24 +195,33 @@ class GitHubClient:
         )
 
     def get_workflow_runs_paged(
-        self,
-        owner: str,
-        repo: str,
-        created: str | None = None,
-        max_pages: int = 10,
+    self,
+    owner: str,
+    repo: str,
+    created: str | None = None,
+    max_runs: int = 150,
+    max_pages: int | None = None,
     ):
         """Yield (page_number, page_runs, total_count) per page for streaming."""
+        if max_pages is not None:
+            max_runs = max_pages * 100
         params: dict = {"per_page": 100}
         if created:
             params["created"] = created
         path = f"/repos/{owner}/{repo}/actions/runs"
-        for page in range(1, max_pages + 1):
+        collected = 0
+        pages_needed = (max_runs + 99) // 100  # ceil division
+        for page in range(1, pages_needed + 1):
             params["page"] = page
             data = self._get_json(path, params)
             total_count = data.get("total_count", 0)
             page_runs = data.get("workflow_runs", [])
+            remaining = max_runs - collected
+            if len(page_runs) > remaining:
+                page_runs = page_runs[:remaining]
+            collected += len(page_runs)
             yield page, page_runs, total_count
-            if len(page_runs) < 100:
+            if collected >= max_runs or len(page_runs) < 100:
                 break
 
     def get_runs_for_workflow(
