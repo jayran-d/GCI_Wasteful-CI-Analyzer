@@ -53,6 +53,39 @@ def _sse(event: str, data: dict) -> str:
     return f"data: {json.dumps({'event': event, **data})}\n\n"
 
 
+def _extract_flagged_run_ids(obj, key=None):
+    """
+    Recursively extract run IDs that are explicitly present in an analyzer
+    result's detail/findings structures. Skips summary, energy_waste, and
+    recommendations so we only get IDs from actual flagged-run records.
+    """
+    ids = set()
+    if obj is None or not isinstance(obj, (dict, list)):
+        return ids
+    if isinstance(obj, list):
+        # Arrays named *_ids or run_ids contain bare ID numbers
+        if key and (key.endswith('_ids') or key == 'run_ids'):
+            for item in obj:
+                if isinstance(item, (int, float)) and item > 0:
+                    ids.add(int(item))
+        else:
+            for item in obj:
+                ids.update(_extract_flagged_run_ids(item))
+        return ids
+    # Dict — only pick up explicit run-reference fields (not generic 'id')
+    for field in ('run_id', 'child_run_id'):
+        v = obj.get(field)
+        if isinstance(v, (int, float)) and v > 0:
+            ids.add(int(v))
+    # Recurse but skip non-detail sections
+    for k, v in obj.items():
+        if k in ('summary', 'energy_waste', 'recommendations'):
+            continue
+        if isinstance(v, (dict, list)):
+            ids.update(_extract_flagged_run_ids(v, k))
+    return ids
+
+
 @app.route("/")
 def index():
     return jsonify({"service": "GCI API", "docs": "POST /api/analyze/stream or /api/analyze"})
@@ -149,6 +182,12 @@ def analyze_stream():
                             "html_url": r.get("html_url"),
                             "created_at": r.get("created_at"),
                             "head_branch": r.get("head_branch"),
+                            "head_sha": r.get("head_sha", ""),
+                            "commit_message": (
+                                r.get("head_commit", {}).get("message", "").split("\n")[0]
+                                if isinstance(r.get("head_commit"), dict)
+                                else ""
+                            ),
                         }
                         for r in page_runs
                     ],
@@ -264,6 +303,11 @@ def analyze_stream():
             ew = result.get("energy_waste", {})
             if ew.get("total_energy_kwh"):
                 all_energy.append(ew)
+
+            # ── Extract only the run IDs actually in the detail structures ──
+            if "error" not in result:
+                flagged_ids = _extract_flagged_run_ids(result)
+                result["flagged_run_ids"] = sorted(flagged_ids)
 
             yield _sse("analyzer_complete", {"key": key, "result": result})
 

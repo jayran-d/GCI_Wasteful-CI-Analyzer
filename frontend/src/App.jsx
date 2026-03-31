@@ -275,35 +275,42 @@ function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) 
   const pct = s.waste_percentage ?? s.flakiness_rate_of_failures ?? 0
   const severity = pct > 15 ? 'bad' : pct > 3 ? 'warn' : 'ok'
 
-  // Collect run IDs from result for AI diagnosis — recursively scan all arrays in the result
-  const failedRunIds = []
+  // Use backend-provided flagged_run_ids (only IDs actually in detail structures)
+  const flaggedRunIds = []
   if (data.result) {
-    const seen = new Set()
-    const addId = (rid) => {
-      if (rid && typeof rid === 'number' && !seen.has(rid)) {
-        seen.add(rid)
-        failedRunIds.push(rid)
-      }
-    }
-    const scan = (obj, key) => {
-      if (!obj || typeof obj !== 'object') return
-      if (Array.isArray(obj)) {
-        if (key && (key.endsWith('_ids') || key === 'run_ids')) {
-          for (const item of obj) { if (typeof item === 'number') addId(item) }
-        } else {
-          for (const item of obj) scan(item)
+    if (Array.isArray(data.result.flagged_run_ids) && data.result.flagged_run_ids.length > 0) {
+      flaggedRunIds.push(...data.result.flagged_run_ids)
+    } else {
+      // Fallback: recursive scan for older backends without flagged_run_ids
+      const seen = new Set()
+      const addId = (rid) => {
+        if (rid && typeof rid === 'number' && !seen.has(rid)) {
+          seen.add(rid)
+          flaggedRunIds.push(rid)
         }
-        return
       }
-      addId(obj.run_id || obj.child_run_id || obj.id)
-      for (const [k, v] of Object.entries(obj)) {
-        if (typeof v === 'object' && v !== null) scan(v, k)
+      const scan = (obj, key) => {
+        if (!obj || typeof obj !== 'object') return
+        if (Array.isArray(obj)) {
+          if (key && (key.endsWith('_ids') || key === 'run_ids')) {
+            for (const item of obj) { if (typeof item === 'number') addId(item) }
+          } else {
+            for (const item of obj) scan(item)
+          }
+          return
+        }
+        // Only pick up explicit run references, not generic 'id'
+        addId(obj.run_id || obj.child_run_id)
+        for (const [k, v] of Object.entries(obj)) {
+          if (['summary', 'energy_waste', 'recommendations'].includes(k)) continue
+          if (typeof v === 'object' && v !== null) scan(v, k)
+        }
       }
+      scan(data.result)
     }
-    scan(data.result)
   }
 
-  const linkedRunIdSet = new Set(failedRunIds)
+  const linkedRunIdSet = new Set(flaggedRunIds)
 
   // Build analyzer context to pass to AI diagnosis
   const analyzerContext = data.result && !data.result.error ? {
@@ -359,12 +366,12 @@ function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) 
                 />
               )}
 
-              {geminiKey && failedRunIds.length > 0 && (
+              {geminiKey && flaggedRunIds.length > 0 && (
                 <AIDiagnosePanel
                   repo={repo}
                   token={token}
                   geminiKey={geminiKey}
-                  runIds={failedRunIds}
+                  runIds={flaggedRunIds}
                   analyzerContext={analyzerContext}
                 />
               )}
@@ -392,7 +399,7 @@ function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) 
 
 function DebugRunsPanel({ allRuns, linkedRunIds, repoLabel }) {
   const [open, setOpen] = useState(false)
-  const [filter, setFilter] = useState('all')
+  const [filter, setFilter] = useState('linked')
 
   const failedCount = allRuns.filter(r => r.conclusion === 'failure').length
   const successCount = allRuns.filter(r => r.conclusion === 'success').length
@@ -409,8 +416,8 @@ function DebugRunsPanel({ allRuns, linkedRunIds, repoLabel }) {
       <div className="debug-runs-toggle" onClick={() => setOpen(!open)}>
         <span className="debug-runs-icon">🔍</span>
         <span className="debug-runs-label">
-          Debug: {allRuns.length} fetched runs
-          {linkedRunIds.size > 0 && <span className="debug-linked-count"> · {linkedRunIds.size} linked to this analyzer</span>}
+          Flagged runs: {linkedRunIds.size}
+          <span className="debug-linked-count"> · {allRuns.length} total fetched</span>
         </span>
         <span className="debug-runs-chevron">{open ? '▾' : '▸'}</span>
       </div>
@@ -418,8 +425,8 @@ function DebugRunsPanel({ allRuns, linkedRunIds, repoLabel }) {
         <div className="debug-runs-body">
           <div className="debug-filter-bar">
             {[
+              ['linked', `Flagged (${linkedRunIds.size})`],
               ['all', `All (${allRuns.length})`],
-              ['linked', `Linked (${linkedRunIds.size})`],
               ['failed', `Failed (${failedCount})`],
               ['success', `Success (${successCount})`],
             ].map(([key, label]) => (
@@ -437,6 +444,7 @@ function DebugRunsPanel({ allRuns, linkedRunIds, repoLabel }) {
               <span className="debug-col-status">Status</span>
               <span className="debug-col-id">Run ID</span>
               <span className="debug-col-name">Workflow</span>
+              <span className="debug-col-commit">Commit</span>
               <span className="debug-col-branch">Branch</span>
               <span className="debug-col-link">Link</span>
             </div>
@@ -447,6 +455,24 @@ function DebugRunsPanel({ allRuns, linkedRunIds, repoLabel }) {
                 </span>
                 <span className="debug-run-id">#{r.id}</span>
                 <span className="debug-run-name" title={r.name}>{r.name}</span>
+                <span className="debug-run-commit" title={r.commit_message || r.head_sha || ''}>
+                  {r.head_sha ? (
+                    <a
+                      className="debug-sha-link"
+                      href={`https://github.com/${repoLabel}/commit/${r.head_sha}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={r.commit_message || r.head_sha}
+                    >
+                      <span className="debug-sha">{r.head_sha.slice(0, 7)}</span>
+                      {r.commit_message && (
+                        <span className="debug-commit-msg">
+                          {r.commit_message.length > 40 ? r.commit_message.slice(0, 37) + '…' : r.commit_message}
+                        </span>
+                      )}
+                    </a>
+                  ) : '—'}
+                </span>
                 <span className="debug-run-branch" title={r.head_branch}>{r.head_branch || '—'}</span>
                 <a
                   className="debug-run-link"

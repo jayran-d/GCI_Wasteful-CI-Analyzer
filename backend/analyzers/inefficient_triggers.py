@@ -1,4 +1,4 @@
-from energy import estimate_energy, aggregate_estimates
+from energy import estimate_energy, aggregate_estimates, detect_runner_type
 from utils import run_duration
 
 
@@ -14,7 +14,6 @@ class InefficientTriggerAnalyzer:
         self.client = client
 
     def analyze(self, owner, repo, runs, deep_scan=True, progress_cb=None):
-        self._run_url = f"https://github.com/{owner}/{repo}/actions/runs"
         ci_runs = [
             run for run in runs
             if run.get("event") in ("push", "pull_request")
@@ -72,7 +71,7 @@ class InefficientTriggerAnalyzer:
                 energy_estimates.append(
                     estimate_energy(
                         duration_seconds,
-                        "linux"
+                        detect_runner_type(run.get("labels", []))
                     )
                 )
 
@@ -81,11 +80,6 @@ class InefficientTriggerAnalyzer:
 
         if progress_cb:
             progress_cb(f"Found {inefficient_count} likely inefficient run(s).")
-            for d in inefficient_detail[:10]:
-                progress_cb(
-                    f"  ↳ '{d['workflow']}' on docs-only commit {d['sha']} "
-                    f"{self._run_url}/{d['run_id']}"
-                )
 
         return {
             "analyzer": self.key,
@@ -99,7 +93,7 @@ class InefficientTriggerAnalyzer:
             "energy_waste": aggregate_estimates(energy_estimates),
             "inefficient_runs": {
                 "count": inefficient_count,
-                "detail": inefficient_detail[:15],
+                "detail": inefficient_detail,
             },
             "recommendations": self._build_recommendations(inefficient_detail),
         }
@@ -142,7 +136,7 @@ class InefficientTriggerAnalyzer:
     def _is_heavy_workflow(self, workflow_name):
         name = workflow_name.lower()
 
-        heavy_keywords = ["build", "test", "deploy", "docker", "ci", "release"]
+        heavy_keywords = ["build", "test", "deploy", "docker", "ci", "release", "integration","pipeline","compile"]
         light_keywords = ["lint", "check", "format", "compliance"]
 
         if any(keyword in name for keyword in light_keywords):
