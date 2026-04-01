@@ -31,7 +31,7 @@ from utils import run_duration
 
 class FlakinessAnalyzer:
     key = "flakiness"
-    title = "Non-deterministic Test Flakiness"
+    title = "Non-deterministic Job Flakiness"
     description = (
         "Detects flaky jobs by finding different outcomes for the same job "
         "across rerun attempts within the same workflow run."
