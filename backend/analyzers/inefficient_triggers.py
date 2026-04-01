@@ -7,22 +7,22 @@ class InefficientTriggerAnalyzer:
     title = "Inefficient CI Triggering for Minor Changes"
     description = (
         "Detects likely unnecessary CI runs triggered by docs-only or other "
-        "non-functional changes."
-    )
+        "non-functional changes.")
 
     def __init__(self, client):
         self.client = client
 
     def analyze(self, owner, repo, runs, deep_scan=True, progress_cb=None):
         ci_runs = [
-            run for run in runs
-            if run.get("event") in ("push", "pull_request")
+            run for run in runs if run.get("event") in ("push", "pull_request")
         ]
 
-        total_failed_runs = sum(1 for run in ci_runs if run.get("conclusion") == "failure")
+        total_failed_runs = sum(1 for run in ci_runs
+                                if run.get("conclusion") == "failure")
 
         if progress_cb:
-            progress_cb(f"Checking {len(ci_runs)} CI runs for docs-only changes...")
+            progress_cb(
+                f"Checking {len(ci_runs)} CI runs for docs-only changes...")
 
         inefficient_detail = []
         energy_estimates = []
@@ -30,11 +30,14 @@ class InefficientTriggerAnalyzer:
         workflow_cache = {}
 
         for index, run in enumerate(ci_runs, start=1):
-            if run.get("conclusion") != "success":
+            if run.get("conclusion") not in {"success", "failure"}:
                 continue
 
             workflow_name = run.get("name", "")
-            if not self._is_heavy_workflow(workflow_name):
+            workflow_path = run.get("path", "")
+
+            print(workflow_path)
+            if not self._is_heavy_workflow(workflow_name, workflow_path):
                 continue
 
             sha = run.get("head_sha")
@@ -43,43 +46,53 @@ class InefficientTriggerAnalyzer:
 
             if sha not in sha_cache:
                 if progress_cb:
-                    progress_cb(f"Fetching changed files for commit {sha[:8]}... [{index}/{len(ci_runs)}]")
+                    progress_cb(
+                        f"Fetching changed files for commit {sha[:8]}... [{index}/{len(ci_runs)}]"
+                    )
                 sha_cache[sha] = self.client.get_commit_files(owner, repo, sha)
 
             changed_files = sha_cache[sha]
             if not self._is_non_functional(changed_files):
                 continue
-        
-            workflow_path = run.get("path", "")
+
+            print(f"these are the files that we are checking: {changed_files} and the sha {sha} and the event type {run.get('event')} and this is the id {run.get('id')}")
+
+            # workflow_path = run.get("path", "")
             if workflow_path not in workflow_cache:
-                workflow_cache[workflow_path] = self._get_trigger_info(owner, repo, workflow_path)
+                workflow_cache[workflow_path] = self._get_trigger_info(
+                    owner, repo, workflow_path)
 
             trigger_info = workflow_cache[workflow_path]
             reason = self._build_reason(trigger_info)
 
             inefficient_detail.append({
-                "run_id": run["id"],
-                "workflow": workflow_name,
-                "sha": sha[:8],
-                "changed_files": changed_files,
-                "trigger_paths": trigger_info["trigger_paths"],
-                "reason": reason,
+                "run_id":
+                run["id"],
+                "workflow":
+                workflow_name,
+                "sha":
+                sha,
+                "changed_files":
+                changed_files,
+                "trigger_paths":
+                trigger_info["trigger_paths"],
+                "reason":
+                reason,
             })
 
             duration_seconds = run_duration(run)
             if duration_seconds > 0:
                 energy_estimates.append(
-                    estimate_energy(
-                        duration_seconds,
-                        detect_runner_type(run.get("labels", []))
-                    )
-                )
+                    estimate_energy(duration_seconds,
+                                    detect_runner_type(run.get("labels", []))))
 
         inefficient_count = len(inefficient_detail)
-        waste_percentage = round((inefficient_count / len(ci_runs)) * 100, 1) if ci_runs else 0
+        waste_percentage = round(
+            (inefficient_count / len(ci_runs)) * 100, 1) if ci_runs else 0
 
         if progress_cb:
-            progress_cb(f"Found {inefficient_count} likely inefficient run(s).")
+            progress_cb(
+                f"Found {inefficient_count} likely inefficient run(s).")
 
         return {
             "analyzer": self.key,
@@ -112,12 +125,14 @@ class InefficientTriggerAnalyzer:
         }
 
         image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
+        
 
         for file_path in files:
             lowered = file_path.lower().replace("\\", "/")
             basename = lowered.split("/")[-1]
 
-            if lowered.startswith(("docs/", "documentation/", "images/", "assets/")):
+            if lowered.startswith(
+                ("docs/", "documentation/", "images/", "assets/")):
                 continue
 
             if lowered.endswith((".md", ".rst", ".adoc")):
@@ -133,18 +148,29 @@ class InefficientTriggerAnalyzer:
 
         return True
 
+    def _is_heavy_workflow(self, workflow_name, workflow_path=""):
+        name = (workflow_name or "").lower()
+        path = (workflow_path or "").lower()
+        filename = path.split("/")[-1]
+        heavy_keywords = [
+            "build", "test", "deploy", "docker", "ci", "release",
+            "integration", "pipeline", "compile", "gradle"
+        ]
+        light_keywords = ["lint", "format", "compliance"]
 
-    def _is_heavy_workflow(self, workflow_name):
-        name = workflow_name.lower()
+        searchable_text = f"{name} {filename} {path}"
+        print(f"this is the searchable text: {searchable_text}")
 
-        heavy_keywords = ["build", "test", "deploy", "docker", "ci", "release", "integration","pipeline","compile"]
-        light_keywords = ["lint", "check", "format", "compliance"]
+        has_heavy = any(keyword in searchable_text
+                        for keyword in heavy_keywords)
+        has_light = any(keyword in searchable_text
+                        for keyword in light_keywords)
 
-        if any(keyword in name for keyword in light_keywords):
-            return False
-
-        if any(keyword in name for keyword in heavy_keywords):
+        if has_heavy:
             return True
+
+        if has_light:
+            return False
 
         return False
 
@@ -169,7 +195,8 @@ class InefficientTriggerAnalyzer:
             stripped = line.strip()
             if stripped.startswith("- "):
                 value = stripped[2:].strip().strip("'\"")
-                if any(token in value for token in ["*", "/", ".md", "docs", "README"]):
+                if any(token in value
+                       for token in ["*", "/", ".md", "docs", "README"]):
                     trigger_paths.append(value)
 
         return {
@@ -179,12 +206,12 @@ class InefficientTriggerAnalyzer:
         }
 
     def _build_reason(self, trigger_info):
-        if not trigger_info["has_path_filters"] and not trigger_info["has_paths_ignore"]:
+        if not trigger_info["has_path_filters"] and not trigger_info[
+                "has_paths_ignore"]:
             return (
                 "This run was flagged because the workflow appears heavy, the commit only "
                 "changed documentation or other non-functional files, and the workflow "
-                "appears to have no path-based filtering."
-            )
+                "appears to have no path-based filtering.")
 
         return (
             "This run was flagged because the workflow appears heavy and the commit only "
@@ -194,9 +221,12 @@ class InefficientTriggerAnalyzer:
 
     def _build_recommendations(self, inefficient_runs):
         if not inefficient_runs:
-            return ["No obvious docs-only trigger inefficiencies were detected."]
+            return [
+                "No obvious docs-only trigger inefficiencies were detected."
+            ]
 
-        has_broad_triggers = any(not run["trigger_paths"] for run in inefficient_runs)
+        has_broad_triggers = any(not run["trigger_paths"]
+                                 for run in inefficient_runs)
 
         recommendations = [
             "Split lightweight checks from expensive build, test, or deploy workflows where possible.",
