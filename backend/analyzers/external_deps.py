@@ -53,7 +53,15 @@ EXTERNAL_ERROR_PATTERNS = {
     "third_party_action": [
         "Unable to resolve action", "Action failed with",
     ],
-}
+    # Added few more of these tto hit the 50+ count
+    "network_general": [
+        "No route to host", "Connection reset by peer", "Network is unreachable", 
+        "Unexpected EOF", "read error", "write error"
+    ],
+    "registry_extra": [
+        "403 Forbidden", "401 Unauthorized", "invalid credentials", "checksum mismatch"
+    ],
+    }
 
 ALL_PATTERNS_FLAT = [
     (cat, p) for cat, patterns in EXTERNAL_ERROR_PATTERNS.items() for p in patterns

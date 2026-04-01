@@ -9,8 +9,8 @@ Methodology:
 
   - Power (watts): per-vCPU estimate of 3.5W at CI-typical load (70-90%
     utilization), based on AMD EPYC server-class processors used by Azure.
-    Multiplied by core count and PUE 1.125 (Microsoft Azure published avg).
-    Default: 2-core Linux runner -> 3.5W x 2 x 1.125 = 7.88W
+    Multiplied by core count and PUE 1.17 (Microsoft Azure published avg).
+
 
   - Cost: GitHub Actions published per-minute billing rates (March 2026).
     Default: Linux 2-core x64 = $0.006/min.
@@ -24,6 +24,8 @@ from dataclasses import dataclass
 # ---------------------------------------------------------------------------
 _N_REGIONS = 11
 _EQ_W = round(1.0 / _N_REGIONS, 6)  # 0.090909
+
+_REPORT_PUE = 1.17     
 
 REGION_CARBON_INTENSITY = {
     #  region            g/kWh   weight (equal)   source
@@ -127,7 +129,7 @@ def estimate_energy(duration_seconds: float, runner_type: str = "linux") -> Ener
     """Estimate energy, CO2 (with confidence range), and cost for a run/job."""
     power_w = RUNNER_POWER_W.get(runner_type, RUNNER_POWER_W["default"])
     hours = duration_seconds / 3600
-    energy_kwh = (power_w * hours) / 1000
+    energy_kwh = (power_w * hours * _REPORT_PUE) / 1000
 
     carbon_g       = energy_kwh * CARBON_INTENSITY_G_PER_KWH
     carbon_g_lower = energy_kwh * CARBON_INTENSITY_LOWER

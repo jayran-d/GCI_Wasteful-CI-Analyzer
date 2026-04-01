@@ -236,6 +236,17 @@ class ZombieWorkflowAnalyzer:
             if fail_rate < fail_threshold:
                 continue
 
+            # --- START OF MODIFICATION ---
+            # EXCLUSION: If the most recent run was a success, it's not a zombie.
+            # We find the runs for this specific workflow and sort them by date.
+            wf_runs = [r for r in scheduled_runs if (r.get("workflow_id") or r.get("name")) == wf_id]
+            if wf_runs:
+                latest_run = max(wf_runs, key=lambda r: r.get("created_at", ""))
+                if latest_run.get("conclusion") == "success":
+                    # This workflow was recently fixed; do not flag as a zombie.
+                    continue 
+            # --- END OF MODIFICATION ---
+
             # Calculate how long this zombie has been running
             span_days = 0
             if data["first_fail"] and data["last_fail"]:
