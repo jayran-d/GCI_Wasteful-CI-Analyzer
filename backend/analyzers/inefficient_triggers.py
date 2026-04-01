@@ -114,13 +114,13 @@ class InefficientTriggerAnalyzer:
         image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
 
         for file_path in files:
-            lowered = file_path.lower()
+            lowered = file_path.lower().replace("\\", "/")
             basename = lowered.split("/")[-1]
 
-            if lowered.startswith("docs/") or lowered.startswith("documentation/"):
+            if lowered.startswith(("docs/", "documentation/", "images/", "assets/")):
                 continue
 
-            if lowered.endswith(".md") or lowered.endswith(".rst") or lowered.endswith(".adoc"):
+            if lowered.endswith((".md", ".rst", ".adoc")):
                 continue
 
             if lowered.endswith(image_extensions):
@@ -132,6 +132,7 @@ class InefficientTriggerAnalyzer:
             return False
 
         return True
+
 
     def _is_heavy_workflow(self, workflow_name):
         name = workflow_name.lower()
