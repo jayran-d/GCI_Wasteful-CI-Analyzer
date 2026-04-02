@@ -54,7 +54,7 @@ It includes:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-org-or-user>/GCI_Wasteful-CI-Analyzer.git
+git clone https://github.com/jayran-d/GCI_Wasteful-CI-Analyzer.git
 cd GCI_Wasteful-CI-Analyzer
 ```
 
