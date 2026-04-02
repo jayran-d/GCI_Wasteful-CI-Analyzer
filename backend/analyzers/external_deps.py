@@ -6,7 +6,7 @@ network issues, and flaky external actions.
 
 Layers:
   1. Metadata: early-death transients, temporal clusters, third-party steps
-  2. Logs (opt-in deep_scan): pattern matching for 50+ error signatures
+  2. Logs (deep_scan): pattern matching for 50+ error signatures
 """
 
 from collections import defaultdict
@@ -16,52 +16,100 @@ from utils import run_duration, get_run_duration_from_jobs
 
 
 EXTERNAL_ERROR_PATTERNS = {
-    "network_timeout": [
-        "ETIMEDOUT", "ESOCKETTIMEDOUT", "ECONNRESET", "ECONNREFUSED",
-        "Connection timed out", "timed out waiting", "dial tcp",
+    # --- Layer 1: Core Networking & Protocol Failures ---
+    "network_general": [
+        "connection reset by peer", "read: connection reset by peer",
+        "write: broken pipe", 
+        "ESOCKETTIMEDOUT",
+        "ECONNRESET", "ECONNREFUSED", "EHOSTUNREACH", "EAI_AGAIN",
+        "fatal: early EOF", "fatal: the remote end hung up",
+        # REMOVE: "Client.Timeout exceeded" - too ambiguous
+        "Net: Read error",  # Actually KEEP this - it's specific to network stack
+        "Unexpected EOF",
+        "temporary failure in name resolution", "getaddrinfo ENOTFOUND",
+        "Name or service not known", "Could not resolve host"
     ],
-    "dns_failure": [
-        "ENOTFOUND", "Could not resolve host", "getaddrinfo ENOTFOUND",
-        "Name or service not known", "Temporary failure in name resolution",
-    ],
-    "http_5xx": [
-        "503 Service Unavailable", "502 Bad Gateway", "500 Internal Server Error",
-        "504 Gateway Timeout",
-    ],
-    "registry_npm": [
-        "npm ERR! network", "npm ERR! code ECONNRESET",
-        "npm ERR! code ETIMEDOUT", "npm ERR! code E503",
-        "registry.npmjs.org", "FETCH_ERROR",
-    ],
-    "registry_pip": [
-        "Could not fetch URL", "ReadTimeoutError", "pypi.org",
-        "Failed to establish a new connection",
-    ],
-    "registry_docker": [
-        "toomanyrequests", "You have reached your pull rate limit",
-        "denied: too many requests", "manifest unknown",
-    ],
-    "registry_maven": [
-        "Could not transfer artifact", "ReasonPhrase:Service Unavailable",
-    ],
-    "aws_errors": [
-        "ThrottlingException", "RequestLimitExceeded", "503 Slow Down",
+    "http_5xx_outages": [
+        "500 Internal Server Error", "502 Bad Gateway", "503 Service Unavailable", 
+        "504 Gateway Timeout", 
+        # REMOVE: "Error 520" through "530" - too CloudFlare-specific
+        "HTTP 429",  # ADD: explicit 429 status
     ],
     "ssl_errors": [
         "SSL certificate problem", "CERT_HAS_EXPIRED", "certificate verify failed",
+        "unable to get local issuer certificate", 
+        "CERT_UNTRUSTED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "DEPTH_ZERO_SELF_SIGNED_CERT"
     ],
-    "third_party_action": [
-        "Unable to resolve action", "Action failed with",
+
+    # --- Layer 2: Language & Package Registries ---
+    "registry_npm_yarn_pnpm": [
+        "npm ERR! network", "npm ERR! code E429", "npm ERR! code E503",
+        "npm ERR! code ETIMEDOUT", "npm ERR! code ECONNRESET",
+        "npm ERR! invalid json response body", 
+        "npm ERR! checksum mismatch", "npm ERR! code ENEEDAUTH", 
+        "npm ERR! 405 Method Not Allowed", 
+        "yarn error: 429", 
+        # REMOVE: "YN0001 - EXCEPTION" - too broad
+        "ERR_PNPM_TARBALL_INTEGRITY",
+        # REMOVE: "rate limited exceeded" - too generic
     ],
-    # Added few more of these tto hit the 50+ count
-    "network_general": [
-        "No route to host", "Connection reset by peer", "Network is unreachable", 
-        "Unexpected EOF", "read error", "write error"
+    "registry_python_pip": [
+        "pip error: Could not fetch URL", "pip error: ReadTimeoutError",
+        "pip error: ConnectionResetError", "pip error: SSLError",
+        "pip error: Error 104",
+        # ADD:
+        "pip error: 429", "pip error: 503"
     ],
-    "registry_extra": [
-        "403 Forbidden", "401 Unauthorized", "invalid credentials", "checksum mismatch"
+    "registry_maven_gradle_nuget": [
+        "Could not transfer artifact", "ReasonPhrase:Service Unavailable",
+        "Response status code does not indicate success: 503", "transfer failed for",
+        "Failed to read artifact descriptor"
     ],
-    }
+    "registry_ruby_rust_go": [
+        "Gem::RemoteFetcher::FetchError", "spurious network error",
+        "failed to download any data... within 30s", "proxy.golang.org: dial tcp",
+        "sum.golang.org: dial tcp", "Proxy Authentication Required 407"
+    ],
+
+    # --- Layer 3: Infrastructure & Throttling ---
+    "registry_docker_k8s": [
+        "toomanyrequests: You have reached your pull rate limit",
+        "rpc error: code = Unknown desc = toomanyrequests",
+        "ImagePullBackOff",  # SIMPLIFY - remove regex
+        "ErrImagePull",      # SIMPLIFY - remove regex
+        "denied: too many requests", "Cannot connect to the Docker daemon"
+    ],
+    "cloud_provider_limits": [
+        "ThrottlingException", "RequestLimitExceeded", 
+        "503 Slow Down",
+        "TooManyRequestsException", 
+        "quota exhausted", "QuotaExceeded", "OperationNotAllowed",
+        "excessive volume of traffic", "couldn't manage the rate of traffic",
+        # REMOVE: "rate_limit" - too generic, appears in config files
+        # REMOVE: "too many requests" - too vague
+        "Rate limit exceeded"  # KEEP only full phrase
+    ],
+
+    # --- Layer 4: GitHub Infrastructure ---
+    "github_infrastructure": [
+        "secondary rate limit", "GitHub API rate limit exceeded",
+        "lost communication with the server", "Runner lost communication",
+        "received a shutdown signal"
+    ],
+    "environment_drift": [
+        "Error [ERR_REQUIRE_ESM]", "require() of ES modules is not supported",
+        "Must use import to load ES Module"
+    ],
+
+    # --- Layer 5: External Tool Outages ---
+    "external_tooling": [
+        "Too many uploads to this commit", 
+        "Error fetching the storage URL during POST: 400",
+        "SonarQube Cloud analysis failed", "Cypress Binary Could not be found",
+        # REMOVE: "Backend Timeout" - too generic
+        "ConnectTimeoutError"
+    ]
+}
 
 ALL_PATTERNS_FLAT = [
     (cat, p) for cat, patterns in EXTERNAL_ERROR_PATTERNS.items() for p in patterns
@@ -88,7 +136,7 @@ class ExternalDepsAnalyzer:
     def __init__(self, client):
         self.client = client
 
-    def analyze(self, owner, repo, runs, deep_scan=False, deep_scan_limit=30, progress_cb=None):
+    def analyze(self, owner, repo, runs, deep_scan=False, deep_scan_limit=150, progress_cb=None):
         self._cb = progress_cb
         self._run_url = f"https://github.com/{owner}/{repo}/actions/runs"
         failed_runs = [r for r in runs if r.get("conclusion") == "failure"]
@@ -106,11 +154,11 @@ class ExternalDepsAnalyzer:
         if progress_cb:
             progress_cb(f"\u2192 {len(clusters)} temporal clusters found")
 
-        budget_ok = self.client.has_budget(min(len(failed_runs), 50))
+        budget_ok = self.client.has_budget(min(len(failed_runs), 150))
         if not budget_ok and progress_cb:
             progress_cb(f"Low API budget ({self.client.rate_remaining} left) i.e. limiting detailed checks to 10 runs")
 
-        check_limit = min(len(failed_runs), 50) if budget_ok else min(len(failed_runs), 10)
+        check_limit = min(len(failed_runs), 150) if budget_ok else min(len(failed_runs), 10)
         if progress_cb:
             progress_cb(f"Checking {check_limit} failed runs for third-party action issues...")
         third_party, jobs_cache = self._detect_third_party_action_failures(owner, repo, failed_runs[:check_limit])
@@ -135,7 +183,11 @@ class ExternalDepsAnalyzer:
         service_breakdown: dict[str, int] = defaultdict(int)
 
         if deep_scan:
-            targets = flagged_runs[:deep_scan_limit] if flagged_runs else failed_runs[:deep_scan_limit]
+            # Prioritize runs already suspected by metadata heuristics so that
+            # if deep_scan_limit cuts off, the most-likely-external-dep runs
+            # get log-scanned first rather than relying on recency order.
+            # targets = failed_runs[:deep_scan_limit]
+            targets = sorted(failed_runs, key=lambda r: r["id"] not in flagged_ids)[:deep_scan_limit]
             for idx, r in enumerate(targets):
                 if progress_cb:
                     progress_cb(f"Deep scan: downloading logs [{idx+1}/{len(targets)}] {self._run_url}/{r['id']}")
@@ -146,10 +198,21 @@ class ExternalDepsAnalyzer:
                     progress_cb(f"  \u21b3 found: {', '.join(finding['categories'])}")
                 if finding["categories"]:
                     log_findings.append(finding)
-                    flagged_ids.add(r["id"])
+                    # flagged_ids.add(r["id"])  # dead - flagged_ids not read after this point; flagged_runs rebuilt from log_flagged_ids below
                     for cat in finding["categories"]:
                         service_breakdown[cat] += 1
-            flagged_runs = [r for r in failed_runs if r["id"] in flagged_ids]
+
+            log_flagged_ids = {f["run_id"] for f in log_findings}
+            flagged_runs = [r for r in failed_runs if r["id"] in log_flagged_ids]
+
+            # Fetch jobs for log-flagged runs not already in jobs_cache,
+            # so energy estimates always use accurate job-level duration.
+            for r in flagged_runs:
+                if r["id"] not in jobs_cache:
+                    try:
+                        jobs_cache[r["id"]] = self.client.get_jobs_for_run(owner, repo, r["id"])
+                    except Exception:
+                        jobs_cache[r["id"]] = []
 
         # --- Energy: use jobs-based duration where cached, fallback to run-level ---
         energy_estimates = []
