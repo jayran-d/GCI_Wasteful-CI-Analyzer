@@ -238,7 +238,7 @@ class FlakinessAnalyzer:
             "flaky_job_failures": len(flaky_job_names),
             "flaky_failure_events": len(flagged_jobs),
             "flaky_unique_shas": flaky_unique_shas,
-            "flaky_job_names_count": len(flaky_job_names),
+            "flaky_runs_detected": len({j["run_id"] for j in flagged_jobs}),
             "flakiness_rate_of_failures": self._pct(
                 len(flaky_job_names), total_failed_runs
             ),
@@ -251,6 +251,7 @@ class FlakinessAnalyzer:
             "analyzer": self.key,
             "title": self.title,
             "summary": summary,
+            "run_ids": sorted({j["run_id"] for j in flagged_jobs}),
             "frontend_summary": self._build_frontend_summary(
                 summary, top_flaky_jobs, flaky_details
             ),
@@ -293,7 +294,7 @@ class FlakinessAnalyzer:
             "job_groups_checked": 0,
             "flaky_job_failures": 0,
             "flaky_unique_shas": 0,
-            "flaky_job_names_count": 0,
+            "flaky_runs_detected": 0,
             "flakiness_rate_of_failures": 0.0,
             # "flakiness_rate_of_commits": 0.0,
         }
@@ -394,7 +395,7 @@ class FlakinessAnalyzer:
             {"label": "Reruns inspected", "value": summary["rerun_runs_inspected"]},
             {"label": "Job groups checked", "value": summary["job_groups_checked"]},
             {"label": "Flaky job failures", "value": flaky_count},
-            {"label": "Distinct flaky jobs", "value": summary["flaky_job_names_count"]},
+            {"label": "Flaky runs detected", "value": summary["flaky_runs_detected"]},
             {"label": "Flakiness rate", "value": f"{flakiness_rate}%"},
             {"label": "Commits affected", "value": summary["flaky_unique_shas"]},
         ]
