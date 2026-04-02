@@ -18,47 +18,57 @@ Methodology:
 
 from dataclasses import dataclass
 
+
 # ---------------------------------------------------------------------------
-# IP-weighted carbon intensity (g CO2 / kWh)
-# Calculated from github_runner_region_weights.json x current_weights.json
+# Equal-weighted grid carbon intensity (g CO2 / kWh)
+#
+# Grid carbon intensity represents the average grams of CO2 emitted per
+# kilowatt-hour of electricity consumed from the grid.
+#
+# Region-specific factors are assigned to mapped GitHub Actions / Azure regions:
+#   - U.S. regions: EPA eGRID 2023 Revision 2 location-based regional factors
+#   - European regions: Ember European Electricity Review 2024 country values
+#
+# Because individual workflow runs cannot be tied to a specific execution
+# region, the implementation uses equal weighting across the 11 mapped regions.
 # ---------------------------------------------------------------------------
 _N_REGIONS = 11
 _EQ_W = round(1.0 / _N_REGIONS, 6)  # 0.090909
 
-_REPORT_PUE = 1.17  #https://datacenters.microsoft.com/sustainability/efficiency/   
-
+_REPORT_PUE = 1.17  #https://datacenters.microsoft.com/sustainability/efficiency/
 
 REGION_CARBON_INTENSITY = {
     #  region            g/kWh   weight (equal)   source
-    "eastus":          (270.48,  _EQ_W),  # EPA eGRID SRVC
-    "eastus2":         (270.48,  _EQ_W),  # EPA eGRID SRVC
-    "centralus":       (420.31,  _EQ_W),  # EPA eGRID MROW
-    "northcentralus":  (415.54,  _EQ_W),  # EPA eGRID RFCW
-    "southcentralus":  (334.12,  _EQ_W),  # EPA eGRID ERCT
-    "westcentralus":   (472.88,  _EQ_W),  # EPA eGRID RMPA
-    "westus":          (195.05,  _EQ_W),  # EPA eGRID CAMX
-    "westus2":         (288.17,  _EQ_W),  # EPA eGRID NWPP
-    "westus3":         (320.33,  _EQ_W),  # EPA eGRID AZNM
-    "westeurope":      (270.00,  _EQ_W),  # Ember (Netherlands 2023)
-    "northeurope":     (265.00,  _EQ_W),  # Ember (Ireland 2023)
+    "eastus": (270.48, _EQ_W),  # EPA eGRID SRVC
+    "eastus2": (270.48, _EQ_W),  # EPA eGRID SRVC
+    "centralus": (420.31, _EQ_W),  # EPA eGRID MROW
+    "northcentralus": (415.54, _EQ_W),  # EPA eGRID RFCW
+    "southcentralus": (334.12, _EQ_W),  # EPA eGRID ERCT
+    "westcentralus": (472.88, _EQ_W),  # EPA eGRID RMPA
+    "westus": (195.05, _EQ_W),  # EPA eGRID CAMX
+    "westus2": (288.17, _EQ_W),  # EPA eGRID NWPP
+    "westus3": (320.33, _EQ_W),  # EPA eGRID AZNM
+    "westeurope": (270.00, _EQ_W),  # Ember (Netherlands 2023)
+    "northeurope": (265.00, _EQ_W),  # Ember (Ireland 2023)
 }
 
 CARBON_INTENSITY_G_PER_KWH = round(
-    sum(ci * w for ci, w in REGION_CARBON_INTENSITY.values()), 2
-)  # ~320.21 (equal-weighted)
+    sum(ci * w for ci, w in REGION_CARBON_INTENSITY.values()),
+    2)  # ~320.21 (equal-weighted)
 
-CARBON_INTENSITY_LOWER = min(ci for ci, _ in REGION_CARBON_INTENSITY.values())  # 195.05
-CARBON_INTENSITY_UPPER = max(ci for ci, _ in REGION_CARBON_INTENSITY.values())  # 472.88
+CARBON_INTENSITY_LOWER = min(
+    ci for ci, _ in REGION_CARBON_INTENSITY.values())  # 195.05
+CARBON_INTENSITY_UPPER = max(
+    ci for ci, _ in REGION_CARBON_INTENSITY.values())  # 472.88
 
 # ---------------------------------------------------------------------------
 # Power per runner (watts)
 # ---------------------------------------------------------------------------
-_W_ESTIMATED_MACHINE = 3.57 # https://www.green-coding.io/case-studies/carbon-cost-of-testing-pipelines/
-
+_W_ESTIMATED_MACHINE = 3.57  # https://www.green-coding.io/case-studies/carbon-cost-of-testing-pipelines/
 
 RUNNER_POWER_W = {
-    "linux":              round( _W_ESTIMATED_MACHINE, 2),
-    "default":            round( _W_ESTIMATED_MACHINE , 2),
+    "linux": round(_W_ESTIMATED_MACHINE, 2),
+    "default": round(_W_ESTIMATED_MACHINE, 2),
 }
 
 # ---------------------------------------------------------------------------
@@ -66,15 +76,15 @@ RUNNER_POWER_W = {
 # Source: https://docs.github.com/en/billing/reference/actions-runner-pricing
 # ---------------------------------------------------------------------------
 RUNNER_COST_PER_MIN = {
-    "linux":            0.006,   # 2-core x64
-    "linux_4_core":     0.012,
-    "linux_8_core":     0.022,
-    "linux_16_core":    0.042,
-    "linux_32_core":    0.082,
-    "linux_64_core":    0.162,
-    "windows":          0.010,   # 2-core x64
-    "macos":            0.062,   # 3/4-core M1 or Intel
-    "default":          0.006,
+    "linux": 0.006,  # 2-core x64
+    "linux_4_core": 0.012,
+    "linux_8_core": 0.022,
+    "linux_16_core": 0.042,
+    "linux_32_core": 0.082,
+    "linux_64_core": 0.162,
+    "windows": 0.010,  # 2-core x64
+    "macos": 0.062,  # 3/4-core M1 or Intel
+    "default": 0.006,
 }
 
 
@@ -105,6 +115,7 @@ class EnergyEstimate:
 
 def detect_runner_type(labels: list[str] | None) -> str:
     """Map job/run labels to a runner category key.  Defaults to 'linux'."""
+
     if not labels:
         return "linux"
     joined = " ".join(str(l).lower() for l in labels)
@@ -118,18 +129,20 @@ def detect_runner_type(labels: list[str] | None) -> str:
     return "linux"
 
 
-def estimate_energy(duration_seconds: float, runner_type: str = "linux") -> EnergyEstimate:
+def estimate_energy(duration_seconds: float,
+                    runner_type: str = "linux") -> EnergyEstimate:
     """Estimate energy, CO2 (with confidence range), and cost for a run/job."""
     power_w = RUNNER_POWER_W.get(runner_type, RUNNER_POWER_W["default"])
     hours = duration_seconds / 3600
     energy_kwh = (power_w * hours * _REPORT_PUE) / 1000
 
-    carbon_g       = energy_kwh * CARBON_INTENSITY_G_PER_KWH
+    carbon_g = energy_kwh * CARBON_INTENSITY_G_PER_KWH
     carbon_g_lower = energy_kwh * CARBON_INTENSITY_LOWER
     carbon_g_upper = energy_kwh * CARBON_INTENSITY_UPPER
 
     minutes = duration_seconds / 60
-    cost = minutes * RUNNER_COST_PER_MIN.get(runner_type, RUNNER_COST_PER_MIN["default"])
+    cost = minutes * RUNNER_COST_PER_MIN.get(runner_type,
+                                             RUNNER_COST_PER_MIN["default"])
 
     return EnergyEstimate(
         duration_seconds=duration_seconds,
@@ -154,23 +167,30 @@ def aggregate_estimates(estimates: list[EnergyEstimate]) -> dict:
         "count": len(estimates),
     }
     for e in estimates:
-        total["total_duration_seconds"]       += e.duration_seconds
-        total["total_energy_kwh"]             += e.energy_kwh
-        total["total_carbon_grams_co2"]       += e.carbon_grams
+        total["total_duration_seconds"] += e.duration_seconds
+        total["total_energy_kwh"] += e.energy_kwh
+        total["total_carbon_grams_co2"] += e.carbon_grams
         total["total_carbon_grams_co2_lower"] += e.carbon_grams_lower
         total["total_carbon_grams_co2_upper"] += e.carbon_grams_upper
-        total["total_cost_usd"]               += e.cost_usd
+        total["total_cost_usd"] += e.cost_usd
 
-    total["total_duration_minutes"] = round(total["total_duration_seconds"] / 60, 2)
-    total["total_duration_hours"]   = round(total["total_duration_seconds"] / 3600, 2)
-    total["total_energy_wh"]        = round(total["total_energy_kwh"] * 1000, 3)
-    total["total_energy_joules"]    = round(total["total_energy_kwh"] * 3_600_000, 1)
+    total["total_duration_minutes"] = round(
+        total["total_duration_seconds"] / 60, 2)
+    total["total_duration_hours"] = round(
+        total["total_duration_seconds"] / 3600, 2)
+    total["total_energy_wh"] = round(total["total_energy_kwh"] * 1000, 3)
+    total["total_energy_joules"] = round(total["total_energy_kwh"] * 3_600_000,
+                                         1)
 
     total["methodology"] = {
-        "carbon_intensity_g_per_kwh": CARBON_INTENSITY_G_PER_KWH,
-        "carbon_intensity_range": [CARBON_INTENSITY_LOWER, CARBON_INTENSITY_UPPER],
-        "weighting": "Equal weight across 11 GitHub Actions Azure regions",
-        "power_per_vcpu_w": _W_ESTIMATED_MACHINE,
+        "carbon_intensity_g_per_kwh":
+        CARBON_INTENSITY_G_PER_KWH,
+        "carbon_intensity_range":
+        [CARBON_INTENSITY_LOWER, CARBON_INTENSITY_UPPER],
+        "weighting":
+        "Equal weight across 11 GitHub Actions Azure regions",
+        "power_per_vcpu_w":
+        _W_ESTIMATED_MACHINE,
         "sources": [
             "EPA eGRID2023 Rev2 (US regions)",
             "Ember European Electricity Review 2024 (EU regions)",
