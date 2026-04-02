@@ -392,9 +392,11 @@ function DebugRunsPanel({ allRuns, linkedRunIds, repoLabel }) {
 
   const failedCount = allRuns.filter(r => r.conclusion === 'failure').length
   const successCount = allRuns.filter(r => r.conclusion === 'success').length
+  const unflaggedCount = allRuns.filter(r => !linkedRunIds.has(r.id)).length
 
   const filtered = allRuns.filter(r => {
     if (filter === 'linked') return linkedRunIds.has(r.id)
+    if (filter === 'unflagged') return !linkedRunIds.has(r.id)
     if (filter === 'failed') return r.conclusion === 'failure'
     if (filter === 'success') return r.conclusion === 'success'
     return true
@@ -415,6 +417,7 @@ function DebugRunsPanel({ allRuns, linkedRunIds, repoLabel }) {
           <div className="debug-filter-bar">
             {[
               ['linked', `Flagged (${linkedRunIds.size})`],
+               ['unflagged', `Unflagged (${unflaggedCount})`],
               ['all', `All (${allRuns.length})`],
               ['failed', `Failed (${failedCount})`],
               ['success', `Success (${successCount})`],
