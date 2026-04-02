@@ -12,6 +12,20 @@ import requests
 from datetime import datetime, timezone
 
 
+# Common error patterns to look for in job logs
+LOG_ERROR_PATTERNS = [
+    re.compile(r"Error: .+", re.IGNORECASE),
+    re.compile(r"fatal: .+", re.IGNORECASE),
+    re.compile(r"##\[error\].+"),
+    re.compile(r"Process completed with exit code [1-9]\d*"),
+    re.compile(r"The operation was canceled\."),
+    re.compile(r"Canceling since .+ failed"),
+    re.compile(r"A]rtifact .+ not found", re.IGNORECASE),
+    re.compile(r"RequestError \[HttpError\]:.+"),
+    re.compile(r"Cannot download .+"),
+]
+
+
 class GitHubClient:
     """Thin wrapper around the GitHub REST API v3 for Actions data."""
 
@@ -181,25 +195,44 @@ class GitHubClient:
         )
 
     def get_workflow_runs_paged(
-        self,
-        owner: str,
-        repo: str,
-        created: str | None = None,
-        max_pages: int = 10,
+    self,
+    owner: str,
+    repo: str,
+    created: str | None = None,
+    max_pages: int | None = None,
     ):
         """Yield (page_number, page_runs, total_count) per page for streaming."""
+        if max_pages is not None:
+            max_runs = max_pages * 100
         params: dict = {"per_page": 100}
         if created:
             params["created"] = created
         path = f"/repos/{owner}/{repo}/actions/runs"
-        for page in range(1, max_pages + 1):
+        collected = 0
+        pages_needed = (max_runs + 99) // 100  # ceil division
+        for page in range(1, pages_needed + 1):
             params["page"] = page
             data = self._get_json(path, params)
             total_count = data.get("total_count", 0)
             page_runs = data.get("workflow_runs", [])
+            remaining = max_runs - collected
+            if len(page_runs) > remaining:
+                page_runs = page_runs[:remaining]
+            collected += len(page_runs)
             yield page, page_runs, total_count
-            if len(page_runs) < 100:
+            if collected >= max_runs or len(page_runs) < 100:
                 break
+
+    def get_runs_for_workflow(
+        self, owner: str, repo: str, workflow_id: int, max_pages: int = 5
+    ) -> list[dict]:
+        """Return runs for a specific workflow by ID."""
+        return list(
+            self._paginate(
+                f"/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs",
+                max_pages=max_pages,
+            )
+        )
 
     def get_jobs_for_run(self, owner: str, repo: str, run_id: int) -> list[dict]:
         """Return jobs (with steps) for a specific workflow run."""
@@ -218,12 +251,93 @@ class GitHubClient:
         """Return the raw content of a workflow YAML file from the default branch."""
         try:
             data = self._get_json(f"/repos/{owner}/{repo}/contents/{path}")
+            print(f"Fetched workflow file {path} (size {data.get('size', 0)} bytes)")
             if data.get("encoding") == "base64":
                 import base64
                 return base64.b64decode(data["content"]).decode()
             return data.get("content")
         except Exception:
+            print(f"Failed to fetch workflow file {path} for {owner}/{repo}")
             return None
+
+    def find_parent_runs_by_sha(
+        self,
+        owner: str,
+        repo: str,
+        head_sha: str,
+        parent_workflow_names: list[str],
+    ) -> list[dict]:
+        """
+        Find workflow runs that match a given head SHA and belong to one of
+        the named parent workflows.  Returns a list of matching run dicts
+        (usually 0 or 1), sorted most-recent first.
+        """
+        if not head_sha or not parent_workflow_names:
+            return []
+
+        # The runs endpoint supports filtering by head_sha directly
+        try:
+            runs = list(
+                self._paginate(
+                    f"/repos/{owner}/{repo}/actions/runs",
+                    params={"head_sha": head_sha},
+                    max_pages=2,
+                )
+            )
+        except Exception:
+            return []
+
+        # Keep only runs whose workflow name is one of the expected parents
+        parent_name_set = set(parent_workflow_names)
+        matched = [r for r in runs if r.get("name") in parent_name_set]
+
+        # Most recent first (by created_at descending)
+        matched.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        return matched
+
+    def get_job_log_snippet(
+        self,
+        owner: str,
+        repo: str,
+        job_id: int,
+        tail_lines: int = 80,
+    ) -> dict | None:
+        """
+        Download the log for a single job and return a dict with:
+          - matched_patterns: list of pattern-matched error lines
+          - log_preview: last *tail_lines* lines of the log
+        Returns None if the log cannot be retrieved.
+        """
+        try:
+            resp = self._request(
+                "GET",
+                f"/repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
+                allow_redirects=True,
+                timeout=10,
+            )
+            if resp.status_code == 410:
+                return None
+            log_text = resp.text
+        except Exception:
+            return None
+
+        lines = log_text.splitlines()
+        preview = "\n".join(lines[-tail_lines:]) if len(lines) > tail_lines else log_text
+
+        matched = []
+        for line in lines:
+            for pattern in LOG_ERROR_PATTERNS:
+                if pattern.search(line):
+                    # Strip ANSI escape codes and timestamp prefixes for readability
+                    clean = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+                    clean = re.sub(r"^\d{4}-\d{2}-\d{2}T[\d:.Z]+\s*", "", clean)
+                    matched.append(clean)
+                    break  # one match per line is enough
+
+        return {
+            "matched_patterns": matched,
+            "log_preview": preview,
+        }
 
     def download_run_logs(self, owner: str, repo: str, run_id: int) -> dict[str, str]:
         """Download and extract run logs. Returns {filename: log_text}."""
