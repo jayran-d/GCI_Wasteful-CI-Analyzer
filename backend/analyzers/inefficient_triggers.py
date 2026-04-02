@@ -55,7 +55,9 @@ class InefficientTriggerAnalyzer:
             if not self._is_non_functional(changed_files):
                 continue
 
-            print(f"these are the files that we are checking: {changed_files} and the sha {sha} and the event type {run.get('event')} and this is the id {run.get('id')}")
+            print(
+                f"these are the files that we are checking: {changed_files} and the sha {sha} and the event type {run.get('event')} and this is the id {run.get('id')}"
+            )
 
             # workflow_path = run.get("path", "")
             if workflow_path not in workflow_cache:
@@ -66,18 +68,12 @@ class InefficientTriggerAnalyzer:
             reason = self._build_reason(trigger_info)
 
             inefficient_detail.append({
-                "run_id":
-                run["id"],
-                "workflow":
-                workflow_name,
-                "sha":
-                sha,
-                "changed_files":
-                changed_files,
-                "trigger_paths":
-                trigger_info["trigger_paths"],
-                "reason":
-                reason,
+                "run_id": run["id"],
+                "workflow": workflow_name,
+                "sha": sha,
+                "changed_files": changed_files,
+                "trigger_paths":trigger_info["trigger_paths"],
+                "reason":reason,
             })
 
             duration_seconds = run_duration(run)
@@ -125,7 +121,6 @@ class InefficientTriggerAnalyzer:
         }
 
         image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
-        
 
         for file_path in files:
             lowered = file_path.lower().replace("\\", "/")
