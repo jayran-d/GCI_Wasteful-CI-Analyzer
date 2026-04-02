@@ -302,4 +302,4 @@ Before opening a PR:
 
 ## License
 
-No license file is currently included in this repository. If you want outside contributors to reuse or distribute the project under clear terms, add a LICENSE file.
+No license file is currently included in this repository.
