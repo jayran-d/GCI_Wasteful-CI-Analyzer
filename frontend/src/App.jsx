@@ -27,6 +27,45 @@ const ANALYZER_META = {
   workflow_dependencies:  { color: '#2dd4a8', glow: 'rgba(45,212,168,0.3)' },
 }
 
+function extractFlaggedRunIds(result) {
+  const flaggedRunIds = []
+  if (!result) return flaggedRunIds
+
+  if (Array.isArray(result.flagged_run_ids) && result.flagged_run_ids.length > 0) {
+    flaggedRunIds.push(...result.flagged_run_ids)
+    return flaggedRunIds
+  }
+
+  const seen = new Set()
+  const addId = (rid) => {
+    if (rid && typeof rid === 'number' && !seen.has(rid)) {
+      seen.add(rid)
+      flaggedRunIds.push(rid)
+    }
+  }
+  const scan = (obj, key) => {
+    if (!obj || typeof obj !== 'object') return
+    if (Array.isArray(obj)) {
+      if (key && (key.endsWith('_ids') || key === 'run_ids')) {
+        for (const item of obj) {
+          if (typeof item === 'number') addId(item)
+        }
+      } else {
+        for (const item of obj) scan(item)
+      }
+      return
+    }
+    addId(obj.run_id || obj.child_run_id)
+    for (const [k, v] of Object.entries(obj)) {
+      if (['summary', 'energy_waste', 'recommendations'].includes(k)) continue
+      if (typeof v === 'object' && v !== null) scan(v, k)
+    }
+  }
+
+  scan(result)
+  return flaggedRunIds
+}
+
 export default function App() {
   const [phase, setPhase] = useState('input')
   const [step, setStep] = useState(0)
@@ -274,40 +313,7 @@ function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) 
   const pct = s.waste_percentage ?? s.flakiness_rate_of_failures ?? 0
   const severity = pct > 15 ? 'bad' : pct > 3 ? 'warn' : 'ok'
 
-  // Use backend-provided flagged_run_ids (only IDs actually in detail structures)
-  const flaggedRunIds = []
-  if (data.result) {
-    if (Array.isArray(data.result.flagged_run_ids) && data.result.flagged_run_ids.length > 0) {
-      flaggedRunIds.push(...data.result.flagged_run_ids)
-    } else {
-      // Fallback: recursive scan for older backends without flagged_run_ids
-      const seen = new Set()
-      const addId = (rid) => {
-        if (rid && typeof rid === 'number' && !seen.has(rid)) {
-          seen.add(rid)
-          flaggedRunIds.push(rid)
-        }
-      }
-      const scan = (obj, key) => {
-        if (!obj || typeof obj !== 'object') return
-        if (Array.isArray(obj)) {
-          if (key && (key.endsWith('_ids') || key === 'run_ids')) {
-            for (const item of obj) { if (typeof item === 'number') addId(item) }
-          } else {
-            for (const item of obj) scan(item)
-          }
-          return
-        }
-        // Only pick up explicit run references, not generic 'id'
-        addId(obj.run_id || obj.child_run_id)
-        for (const [k, v] of Object.entries(obj)) {
-          if (['summary', 'energy_waste', 'recommendations'].includes(k)) continue
-          if (typeof v === 'object' && v !== null) scan(v, k)
-        }
-      }
-      scan(data.result)
-    }
-  }
+  const flaggedRunIds = extractFlaggedRunIds(data.result)
 
   const linkedRunIdSet = new Set(flaggedRunIds)
 
@@ -374,6 +380,13 @@ function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) 
                     return <div key={i} className="rec-item">→ {r}</div>
                   })}
                 </div>
+              )}
+              {allRuns.length > 0 && (
+                <DebugRunsPanel
+                  allRuns={allRuns}
+                  linkedRunIds={linkedRunIdSet}
+                  repoLabel={repoLabel}
+                />
               )}
               <DetailTables result={data.result} />
             </>
