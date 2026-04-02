@@ -355,14 +355,6 @@ function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) 
                   <div className="metric highlight"><div className="metric-val">${fmt3(e.total_cost_usd)}</div><div className="metric-lbl">est. cost</div></div>
                 </>}
               </div>
-               {/* ─── Debug Runs Panel ─── */}
-              {allRuns.length > 0 && repoLabel && (
-                <DebugRunsPanel
-                  allRuns={allRuns}
-                  linkedRunIds={linkedRunIdSet}
-                  repoLabel={repoLabel}
-                />
-              )}
               {geminiKey && flaggedRunIds.length > 0 && (
                 <AIDiagnosePanel
                   repo={repo}

@@ -222,7 +222,7 @@ class WorkflowDependencyAnalyzer:
         parent_failed_count    = 0
         parent_notfound_count  = 0
         log_pattern_count      = 0
-
+        
         for child_wf_name, child_wf_meta in dependent_workflows.items():
             child_wf_id  = child_wf_meta["workflow_id"]
             parent_names = child_wf_meta["triggered_by"]
@@ -232,10 +232,10 @@ class WorkflowDependencyAnalyzer:
             # dependencies — cascade failure analysis doesn't apply.
             if is_wildcard:
                 if progress_cb:
-                    progress_cb(
-                        f"Skipping wildcard workflow '{child_wf_name}' "
-                        f"(triggered by any workflow — not a true dependency chain)"
-                    )
+                    child_runs = [r for r in runs if r.get("workflow_id") == child_wf_id]
+                    progress_cb(f"  → {len(child_runs)} child runs found")
+                    progress_cb(f"{len(dependent_workflows.items())} dependent workflows identified, but '{child_wf_name}' is a wildcard observer")
+                    progress_cb(f"  → triggered by any workflow - not a true dependency chain.")
                 continue
 
             if progress_cb:
