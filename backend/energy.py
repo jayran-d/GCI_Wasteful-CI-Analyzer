@@ -52,7 +52,6 @@ CARBON_INTENSITY_UPPER = max(ci for ci, _ in REGION_CARBON_INTENSITY.values())  
 
 # ---------------------------------------------------------------------------
 # Power per runner (watts)
-# Base: 3.5W per vCPU at CI-load x PUE 1.125 (Azure published average)
 # ---------------------------------------------------------------------------
 _W_ESTIMATED_MACHINE = 3.57 # https://www.green-coding.io/case-studies/carbon-cost-of-testing-pipelines/
 
