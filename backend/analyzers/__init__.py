@@ -5,9 +5,9 @@ from analyzers.inefficient_triggers import InefficientTriggerAnalyzer
 from analyzers.workflow_deps import WorkflowDependencyAnalyzer
 
 ALL_ANALYZERS = [
-    FlakinessAnalyzer, # Nico
-    ZombieWorkflowAnalyzer, # Maja
+    FlakinessAnalyzer,
+    ZombieWorkflowAnalyzer,
     ExternalDepsAnalyzer,
-    InefficientTriggerAnalyzer, # Jay
-    WorkflowDependencyAnalyzer, # Erkin 
+    InefficientTriggerAnalyzer, 
+    WorkflowDependencyAnalyzer,
 ]

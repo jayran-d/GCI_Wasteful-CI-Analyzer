@@ -5,8 +5,7 @@ Flask application with streaming analysis endpoint.
 Routes:
   GET  /                          → Web UI
   POST /api/analyze/stream        → SSE streaming analysis
-  POST /api/analyze               → Batch analysis (original)
-  POST /api/analyze/<key>         → Single analyzer
+  POST /api/diagnose              → AI diagnosis for a flagged run or job
   GET  /api/health                → Health check
 """
 
@@ -22,7 +21,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from github_client import GitHubClient
 from energy import estimate_energy, aggregate_estimates, detect_runner_type, CARBON_INTENSITY_G_PER_KWH
-from impact import compute_impact, compute_sustainability_scores
+from impact import compute_impact
 from utils import run_duration
 from analyzers.zombie_workflows import ZombieWorkflowAnalyzer
 from analyzers.flakiness import FlakinessAnalyzer
@@ -88,7 +87,7 @@ def _extract_flagged_run_ids(obj, key=None):
 
 @app.route("/")
 def index():
-    return jsonify({"service": "GCI API", "docs": "POST /api/analyze/stream or /api/analyze"})
+    return jsonify({"service": "GCI API", "docs": "POST /api/analyze/stream"})
 
 
 @app.route("/api/health")
@@ -340,19 +339,8 @@ def analyze_stream():
             fail_totals.get("total_carbon_grams_co2", 0),
         )
 
-        # Sustainability scores across 5 dimensions
         failure_rate = round(len(all_failed) / len(all_runs) * 100, 1) if all_runs else 0
-        sustainability = compute_sustainability_scores(
-            total_runs=len(all_runs),
-            total_failed=len(all_failed),
-            failure_rate=failure_rate,
-            categorized_waste_minutes=grand_total.get("total_wasted_minutes", 0),
-            total_fail_minutes=fail_totals.get("total_duration_minutes", 0),
-            carbon_grams=fail_totals.get("total_carbon_grams_co2", 0),
-            energy_kwh=fail_totals.get("total_energy_kwh", 0),
-            cost_usd=fail_totals.get("total_cost_usd", 0),
-            analyzer_results=results,
-        )
+
 
         # Uncategorized failure breakdown
         failure_by_workflow = defaultdict(int)
@@ -386,7 +374,6 @@ def analyze_stream():
                 "total_duration_minutes": success_totals.get("total_duration_minutes", 0),
             },
             "impact": fail_impact,
-            "sustainability": sustainability,
             "carbon_intensity_g_per_kwh": CARBON_INTENSITY_G_PER_KWH,
             "top_failing_workflows": [{"name": n, "failures": c} for n, c in top_failing_workflows],
             "generated_at": datetime.now(timezone.utc).isoformat(),

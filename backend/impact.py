@@ -1,13 +1,7 @@
 """
-Impact comparisons and sustainability scoring.
+Impact comparisons.
 
-Converts energy and CO2 into relatable equivalents and computes scores
-across the 5 dimensions of software sustainability:
-  - Economic: cost savings, resource efficiency
-  - Environmental: carbon emissions, energy consumption
-  - Social: team productivity, community signal
-  - Individual: developer time saved, cognitive load
-  - Technical: CI reliability, pipeline health
+Converts energy and CO2 into relatable equivalents
 
 Sources (EPA GHG Equivalencies Calculator 2024):
   - Smartphone charge: ~12.4g CO2
@@ -83,105 +77,6 @@ def compute_impact(energy_kwh: float, carbon_grams: float) -> dict:
         "carbon_grams": round(carbon_grams, 2),
         "comparisons": comparisons,
     }
-
-
-def compute_sustainability_scores(
-    total_runs: int,
-    total_failed: int,
-    failure_rate: float,
-    categorized_waste_minutes: float,
-    total_fail_minutes: float,
-    carbon_grams: float,
-    energy_kwh: float,
-    cost_usd: float,
-    analyzer_results: dict,
-) -> dict:
-    """
-    Compute 0-100 scores for each sustainability dimension.
-
-    Higher = more sustainable (less waste).  Each dimension blends multiple
-    signals from the analysis results.
-    """
-
-    # --- ENVIRONMENTAL (carbon + energy) ---
-    # Penalize proportional to carbon per run; best-case 0g, worst ~5g/run
-    carbon_per_run = carbon_grams / max(total_runs, 1)
-    env_score = max(0, 100 - carbon_per_run * 20)
-
-    # --- ECONOMIC (cost + wasted compute) ---
-    cost_per_run = cost_usd / max(total_runs, 1)
-    waste_ratio = categorized_waste_minutes / max(total_fail_minutes, 1)
-    econ_score = max(0, 100 - (cost_per_run * 500) - (waste_ratio * 40))
-
-    # --- TECHNICAL (reliability, CI health) ---
-    # Based on failure rate and flakiness
-    flaky = _get_nested(analyzer_results, "flakiness", "summary", "flaky_failures") or 0
-    flaky_rate = flaky / max(total_runs, 1) * 100
-    tech_score = max(0, 100 - failure_rate * 1.5 - flaky_rate * 3)
-
-    # --- INDIVIDUAL (developer experience) ---
-    # Zombie workflows and cascade failures waste developer attention
-    zombies = _get_nested(analyzer_results, "zombie_scheduled", "summary", "zombie_workflows") or 0
-    cascades = _get_nested(analyzer_results, "workflow_dependencies", "summary", "flaky_runs_detected") or 0
-    indiv_score = max(0, 100 - zombies * 15 - cascades * 5 - failure_rate * 0.8)
-
-    # --- SOCIAL (team impact, signal quality) ---
-    # Inefficient triggers and external dep failures pollute team signal
-    inefficient = _get_nested(analyzer_results, "inefficient_triggers", "summary", "inefficient_run_count") or 0
-    ext_deps = _get_nested(analyzer_results, "external_deps", "summary", "external_dep_failures") or 0
-    noise_rate = (inefficient + ext_deps) / max(total_runs, 1) * 100
-    social_score = max(0, 100 - noise_rate * 5 - failure_rate * 0.5)
-
-    dimensions = {
-        "environmental": {
-            "score": round(min(100, env_score), 1),
-            "label": "Environmental",
-            "icon": "\U0001f30d",
-            "detail": f"{_fmt(carbon_grams)}g CO\u2082, {_fmt(energy_kwh * 1000)} Wh consumed",
-        },
-        "economic": {
-            "score": round(min(100, econ_score), 1),
-            "label": "Economic",
-            "icon": "\U0001f4b0",
-            "detail": f"${cost_usd:.2f} wasted, {_fmt(categorized_waste_minutes)} min unnecessary compute",
-        },
-        "technical": {
-            "score": round(min(100, tech_score), 1),
-            "label": "Technical",
-            "icon": "\u2699\ufe0f",
-            "detail": f"{failure_rate:.1f}% failure rate, {flaky} flaky failures",
-        },
-        "individual": {
-            "score": round(min(100, indiv_score), 1),
-            "label": "Individual",
-            "icon": "\U0001f9d1\u200d\U0001f4bb",
-            "detail": f"{zombies} zombie workflows, {cascades} cascade failures draining attention",
-        },
-        "social": {
-            "score": round(min(100, social_score), 1),
-            "label": "Social",
-            "icon": "\U0001f465",
-            "detail": f"{inefficient + ext_deps} noise failures polluting team CI signal",
-        },
-    }
-
-    overall = round(
-        sum(d["score"] for d in dimensions.values()) / len(dimensions), 1
-    )
-
-    return {
-        "overall_score": overall,
-        "dimensions": dimensions,
-    }
-
-
-def _get_nested(d, *keys):
-    for k in keys:
-        if not isinstance(d, dict):
-            return None
-        d = d.get(k)
-    return d
-
 
 def _fmt(n):
     if n >= 100:

@@ -7,3 +7,4 @@ script_4.py
 old_inefficient_triggers.py
 backend/.env
 frontend/node_modules
+.codex
