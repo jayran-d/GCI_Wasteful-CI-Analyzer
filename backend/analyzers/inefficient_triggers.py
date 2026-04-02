@@ -36,7 +36,6 @@ class InefficientTriggerAnalyzer:
             workflow_name = run.get("name", "")
             workflow_path = run.get("path", "")
 
-            print(workflow_path)
             if not self._is_heavy_workflow(workflow_name, workflow_path):
                 continue
 
@@ -54,10 +53,6 @@ class InefficientTriggerAnalyzer:
             changed_files = sha_cache[sha]
             if not self._is_non_functional(changed_files):
                 continue
-
-            print(
-                f"these are the files that we are checking: {changed_files} and the sha {sha} and the event type {run.get('event')} and this is the id {run.get('id')}"
-            )
 
             # workflow_path = run.get("path", "")
             if workflow_path not in workflow_cache:
@@ -154,7 +149,6 @@ class InefficientTriggerAnalyzer:
         light_keywords = ["lint", "format", "compliance"]
 
         searchable_text = f"{name} {filename} {path}"
-        print(f"this is the searchable text: {searchable_text}")
 
         has_heavy = any(keyword in searchable_text
                         for keyword in heavy_keywords)
