@@ -25,7 +25,8 @@ from dataclasses import dataclass
 _N_REGIONS = 11
 _EQ_W = round(1.0 / _N_REGIONS, 6)  # 0.090909
 
-_REPORT_PUE = 1.17     
+_REPORT_PUE = 1.17  #https://datacenters.microsoft.com/sustainability/efficiency/   
+
 
 REGION_CARBON_INTENSITY = {
     #  region            g/kWh   weight (equal)   source
@@ -53,24 +54,17 @@ CARBON_INTENSITY_UPPER = max(ci for ci, _ in REGION_CARBON_INTENSITY.values())  
 # Power per runner (watts)
 # Base: 3.5W per vCPU at CI-load x PUE 1.125 (Azure published average)
 # ---------------------------------------------------------------------------
-_W_PER_VCPU = 3.57
+_W_ESTIMATED_MACHINE = 3.57 # https://www.green-coding.io/case-studies/carbon-cost-of-testing-pipelines/
 
 
 RUNNER_POWER_W = {
-    "linux":              round( _W_PER_VCPU, 2),  # 7.88W  (ubuntu-latest, 2-core)
-    "linux_4_core":       round( 4 * _W_PER_VCPU, 2),
-    "linux_8_core":       round( 8 * _W_PER_VCPU, 2),
-    "linux_16_core":      round(16 * _W_PER_VCPU, 2),
-    "linux_32_core":      round(32 * _W_PER_VCPU, 2),
-    "linux_64_core":      round(64 * _W_PER_VCPU, 2),
-    "windows":            round( 2 * _W_PER_VCPU , 2),
-    "macos":              round( 3 * _W_PER_VCPU , 2),  
-    "default":            round( _W_PER_VCPU , 2),
+    "linux":              round( _W_ESTIMATED_MACHINE, 2),
+    "default":            round( _W_ESTIMATED_MACHINE , 2),
 }
 
 # ---------------------------------------------------------------------------
 # GitHub Actions billing rates (USD / minute)
-# Source: docs.github.com/en/billing/.../about-billing-for-github-actions
+# Source: https://docs.github.com/en/billing/reference/actions-runner-pricing
 # ---------------------------------------------------------------------------
 RUNNER_COST_PER_MIN = {
     "linux":            0.006,   # 2-core x64
@@ -177,7 +171,7 @@ def aggregate_estimates(estimates: list[EnergyEstimate]) -> dict:
         "carbon_intensity_g_per_kwh": CARBON_INTENSITY_G_PER_KWH,
         "carbon_intensity_range": [CARBON_INTENSITY_LOWER, CARBON_INTENSITY_UPPER],
         "weighting": "Equal weight across 11 GitHub Actions Azure regions",
-        "power_per_vcpu_w": _W_PER_VCPU,
+        "power_per_vcpu_w": _W_ESTIMATED_MACHINE,
         "sources": [
             "EPA eGRID2023 Rev2 (US regions)",
             "Ember European Electricity Review 2024 (EU regions)",
