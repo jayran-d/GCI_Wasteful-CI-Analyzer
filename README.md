@@ -39,6 +39,7 @@ It includes:
 │   ├── src/              # React frontend
 │   ├── package.json
 │   └── vite.config.js
+├── resources/            # Source/reference JSON data used to derive estimation inputs not      currently read at runtime
 └── README.md
 ```
 

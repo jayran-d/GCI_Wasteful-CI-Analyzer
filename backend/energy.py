@@ -18,7 +18,6 @@ Methodology:
 
 from dataclasses import dataclass
 
-
 # ---------------------------------------------------------------------------
 # Equal-weighted grid carbon intensity (g CO2 / kWh)
 #
@@ -37,19 +36,20 @@ _EQ_W = round(1.0 / _N_REGIONS, 6)  # 0.090909
 
 _REPORT_PUE = 1.17  #https://datacenters.microsoft.com/sustainability/efficiency/
 
+#https://www.cloudcarbonfootprint.org/docs/methodology/#azure-2
 REGION_CARBON_INTENSITY = {
-    #  region            g/kWh   weight (equal)   source
-    "eastus": (270.48, _EQ_W),  # EPA eGRID SRVC
-    "eastus2": (270.48, _EQ_W),  # EPA eGRID SRVC
-    "centralus": (420.31, _EQ_W),  # EPA eGRID MROW
-    "northcentralus": (415.54, _EQ_W),  # EPA eGRID RFCW
-    "southcentralus": (334.12, _EQ_W),  # EPA eGRID ERCT
-    "westcentralus": (472.88, _EQ_W),  # EPA eGRID RMPA
-    "westus": (195.05, _EQ_W),  # EPA eGRID CAMX
-    "westus2": (288.17, _EQ_W),  # EPA eGRID NWPP
-    "westus3": (320.33, _EQ_W),  # EPA eGRID AZNM
-    "westeurope": (270.00, _EQ_W),  # Ember (Netherlands 2023)
-    "northeurope": (265.00, _EQ_W),  # Ember (Ireland 2023)
+    #  region, g/kWh, weight (equal)
+    "eastus": (379.07, _EQ_W),
+    "eastus2": (379.07, _EQ_W),
+    "centralus": (426.25, _EQ_W),
+    "northcentralus": (410.61, _EQ_W),
+    "southcentralus": (373.23, _EQ_W),
+    "westcentralus": (322.17, _EQ_W),
+    "westus": (322.17, _EQ_W),
+    "westus2": (322.17, _EQ_W),
+    "westus3": (322.17, _EQ_W),
+    "westeurope": (329.00, _EQ_W),
+    "northeurope": (279.00, _EQ_W),
 }
 
 CARBON_INTENSITY_G_PER_KWH = round(
