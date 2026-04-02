@@ -20,11 +20,11 @@ const fmt3 = (v) => {
 }
 
 const ANALYZER_META = {
-  flakiness:              { icon: '🎲', color: '#a78bfa', glow: 'rgba(167,139,250,0.3)' },
-  zombie_scheduled:       { icon: '🧟', color: '#f07a6e', glow: 'rgba(240,122,110,0.3)' },
-  external_deps:          { icon: '🔗', color: '#5b9cf5', glow: 'rgba(91,156,245,0.3)' },
-  inefficient_triggers:   { icon: '📄', color: '#f5b731', glow: 'rgba(245,183,49,0.3)' },
-  workflow_dependencies:  { icon: '🔀', color: '#2dd4a8', glow: 'rgba(45,212,168,0.3)' },
+  flakiness:              { color: '#a78bfa', glow: 'rgba(167,139,250,0.3)' },
+  zombie_scheduled:       { color: '#f07a6e', glow: 'rgba(240,122,110,0.3)' },
+  external_deps:          { color: '#5b9cf5', glow: 'rgba(91,156,245,0.3)' },
+  inefficient_triggers:   { color: '#f5b731', glow: 'rgba(245,183,49,0.3)' },
+  workflow_dependencies:  { color: '#2dd4a8', glow: 'rgba(45,212,168,0.3)' },
 }
 
 export default function App() {
@@ -155,15 +155,14 @@ export default function App() {
             <div className="form-group"><label>Gemini API key <span className="optional">(for AI diagnosis)</span></label><input type="password" value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="AIza..." /></div>
           </div>
           <div className="form-footer">
-            <label className="check-label"><input type="checkbox" checked={deepScan} disabled /> Deep scan (logs)</label>
             <button className="btn-go" onClick={startAnalysis}><span className="btn-icon">⚡</span> Analyze</button>
           </div>
         </div>
         <div className="features-row">
           {[
-            { icon: '🎲', label: 'Flaky Tests' }, { icon: '🧟', label: 'Zombie Crons' },
-            { icon: '🔗', label: 'Dep Failures' }, { icon: '📄', label: 'Trigger Waste' },
-            { icon: '🔀', label: 'Cascade Fails' },
+            { label: 'Flaky Tests' }, { label: 'Zombie Crons' },
+            { label: 'Dep Failures' }, { label: 'Trigger Waste' },
+            { label: 'Cascade Fails' },
           ].map((f, i) => (
             <div key={i} className="feature-chip" style={{ animationDelay: `${i * 0.1}s` }}>
               <span>{f.icon}</span> {f.label}
@@ -221,7 +220,7 @@ function FetchProgress({ progress, done }) {
     ? Math.min(100, Math.round(progress.fetched / Math.min(progress.total, 1000) * 100)) : 0
   return (
     <div className="card section fade-in">
-      <div className="section-label">📡 Fetching workflow runs</div>
+      <div className="section-label"> Fetching workflow runs</div>
       <div className="fetch-stats">
         <span className="fetch-count">{progress.fetched}</span>
         <span className="fetch-total">
@@ -236,7 +235,7 @@ function FetchProgress({ progress, done }) {
 function WorkflowTable({ workflows, events }) {
   return (
     <div className="section fade-in">
-      <div className="section-label">📋 Workflow overview</div>
+      <div className="section-label"> Workflow overview</div>
       <div className="event-chips">
         {Object.entries(events).map(([k, v]) => <span key={k} className="chip">{k}: {v}</span>)}
       </div>
@@ -267,7 +266,7 @@ function WorkflowTable({ workflows, events }) {
 function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) {
   const [open, setOpen] = useState(true)
   const logRef = useRef(null)
-  const meta = ANALYZER_META[id] || { icon: '🔍', color: '#6b7a8d', glow: 'rgba(107,122,141,0.3)' }
+  const meta = ANALYZER_META[id] || { color: '#6b7a8d', glow: 'rgba(107,122,141,0.3)' }
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [data.logs])
 
   const s = data.result?.summary || {}
@@ -356,8 +355,7 @@ function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) 
                   <div className="metric highlight"><div className="metric-val">${fmt3(e.total_cost_usd)}</div><div className="metric-lbl">est. cost</div></div>
                 </>}
               </div>
-
-              {/* ─── Debug Runs Panel ─── */}
+               {/* ─── Debug Runs Panel ─── */}
               {allRuns.length > 0 && repoLabel && (
                 <DebugRunsPanel
                   allRuns={allRuns}
@@ -365,7 +363,6 @@ function AnalyzerCard({ id, data, repo, token, geminiKey, repoLabel, allRuns }) 
                   repoLabel={repoLabel}
                 />
               )}
-
               {geminiKey && flaggedRunIds.length > 0 && (
                 <AIDiagnosePanel
                   repo={repo}
@@ -414,7 +411,7 @@ function DebugRunsPanel({ allRuns, linkedRunIds, repoLabel }) {
   return (
     <div className="debug-runs-panel">
       <div className="debug-runs-toggle" onClick={() => setOpen(!open)}>
-        <span className="debug-runs-icon">🔍</span>
+        <span className="debug-runs-icon"></span>
         <span className="debug-runs-label">
           Flagged runs: {linkedRunIds.size}
           <span className="debug-linked-count"> · {allRuns.length} total fetched</span>
@@ -525,13 +522,12 @@ function AIDiagnosePanel({ repo, token, geminiKey, runIds, analyzerContext }) {
   return (
     <div className="ai-panel">
       <div className="ai-panel-header">
-        <span className="ai-icon">🤖</span>
         <span className="ai-label">AI Failure Diagnosis</span>
         <select className="ai-select" value={selectedRun} onChange={e => { setSelectedRun(Number(e.target.value)); setDiagnosis(null) }}>
           {runIds.map(id => <option key={id} value={id}>Run #{id}</option>)}
         </select>
         <button className="btn-ai" onClick={diagnose} disabled={diagnosing}>
-          {diagnosing ? <><span className="spinner-sm" /> Analyzing...</> : '⚡ Diagnose with Gemini'}
+          {diagnosing ? <><span className="spinner-sm" /> Analyzing...</> : ' Diagnose with Gemini'}
         </button>
       </div>
       {diagError && <div className="ai-error">{diagError}</div>}
@@ -639,7 +635,7 @@ function Report({ grandTotal, analyzers, order }) {
 
   return (
     <div className="section fade-in">
-      <div className="report-header"><span className="report-icon">📊</span><span>Final Report</span></div>
+      <div className="report-header"><span className="report-icon"></span><span>Final Report</span></div>
 
       {/* ─── Overall failure impact ─── */}
       <div className="subsection-label">All failed runs — total impact</div>

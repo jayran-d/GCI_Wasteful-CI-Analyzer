@@ -144,8 +144,8 @@ class ZombieWorkflowAnalyzer:
         flagged_run_ids = set()
         for z in zombies:
             flagged_run_ids.update(z.get("failed_run_ids", []))
-        for s in streaks:
-            flagged_run_ids.update(s.get("run_ids", []))
+        # for s in streaks:
+        #     flagged_run_ids.update(s.get("run_ids", []))
 
         energy_estimates = []
         for r in scheduled_runs:

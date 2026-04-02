@@ -57,7 +57,7 @@ _W_PER_VCPU = 3.57
 
 
 RUNNER_POWER_W = {
-    "linux":              round( 2 * _W_PER_VCPU, 2),  # 7.88W  (ubuntu-latest, 2-core)
+    "linux":              round( _W_PER_VCPU, 2),  # 7.88W  (ubuntu-latest, 2-core)
     "linux_4_core":       round( 4 * _W_PER_VCPU, 2),
     "linux_8_core":       round( 8 * _W_PER_VCPU, 2),
     "linux_16_core":      round(16 * _W_PER_VCPU, 2),

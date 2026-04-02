@@ -35,42 +35,42 @@ def compute_impact(energy_kwh: float, carbon_grams: float) -> dict:
 
     if smartphone_charges >= 0.1:
         comparisons.append({
-            "icon": "\U0001f4f1",
+            # "icon": "\U0001f4f1",
             "value": round(smartphone_charges, 1),
             "unit": "smartphone charges",
             "text": f"Equivalent to charging a phone {_fmt(smartphone_charges)} times",
         })
     if led_bulb_hours >= 0.1:
         comparisons.append({
-            "icon": "\U0001f4a1",
+            # "icon": "\U0001f4a1",
             "value": round(led_bulb_hours, 1),
             "unit": "hours of LED light",
             "text": f"Could power an LED bulb for {_fmt(led_bulb_hours)} hours",
         })
     if car_km >= 0.01:
         comparisons.append({
-            "icon": "\U0001f697",
+            # "icon": "\U0001f697",
             "value": round(car_km, 2),
             "unit": "km driven",
             "text": f"Same CO\u2082 as driving a car {_fmt(car_km)} km",
         })
     if google_searches >= 1:
         comparisons.append({
-            "icon": "\U0001f50d",
+            # "icon": "\U0001f50d",
             "value": round(google_searches),
             "unit": "Google searches",
             "text": f"Equivalent to {_fmt(google_searches)} Google searches",
         })
     if streaming_hours >= 0.1:
         comparisons.append({
-            "icon": "\U0001f3ac",
+            # "icon": "\U0001f3ac",
             "value": round(streaming_hours, 1),
             "unit": "hours of streaming",
             "text": f"Same as streaming video for {_fmt(streaming_hours)} hours",
         })
     if tree_days >= 0.01:
         comparisons.append({
-            "icon": "\U0001f333",
+            # "icon": "\U0001f333",
             "value": round(tree_days, 2),
             "unit": "tree-days to offset",
             "text": f"Needs {_fmt(tree_days)} tree-days of CO\u2082 absorption to offset",

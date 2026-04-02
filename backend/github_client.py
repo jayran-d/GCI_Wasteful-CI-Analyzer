@@ -199,7 +199,6 @@ class GitHubClient:
     owner: str,
     repo: str,
     created: str | None = None,
-    max_runs: int = 150,
     max_pages: int | None = None,
     ):
         """Yield (page_number, page_runs, total_count) per page for streaming."""

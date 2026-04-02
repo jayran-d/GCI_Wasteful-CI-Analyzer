@@ -65,7 +65,7 @@ class WorkflowDependencyAnalyzer:
 
         if progress_cb:
             progress_cb(f"→ {len(flaky_runs)} cascade-failure runs detected out of {total_child_runs} child runs")
-        
+
         # Step 4: energy estimation
         energy_estimates = []
         for r in flaky_runs:
@@ -156,12 +156,19 @@ class WorkflowDependencyAnalyzer:
             workflow_run_cfg = triggers.get("workflow_run")
             if isinstance(workflow_run_cfg, dict):
                 parent_names = workflow_run_cfg.get("workflows", [])
-                on_types     = workflow_run_cfg.get("types", [])
+
+                # FIX: "*" wildcard (or any plain string) comes in as a string
+                # instead of a list — normalize it to always be a list.
+                if isinstance(parent_names, str):
+                    parent_names = [parent_names]
+
+                on_types = workflow_run_cfg.get("types", [])
                 dependent_workflows[wf_name] = {
                     "workflow_id":   wf_id,
                     "workflow_file": wf_path,
                     "triggered_by":  parent_names,
                     "on_types":      on_types,
+                    "is_wildcard":   "*" in parent_names,  # flag for downstream use
                 }
                 if progress_cb:
                     base_url = f"https://github.com/{owner}/{repo}/blob/main"
@@ -172,6 +179,8 @@ class WorkflowDependencyAnalyzer:
                     progress_cb(f"    child:  {child_url}")
                     if parent_urls:
                         progress_cb(f"    parent: {parent_urls}")
+                    elif "*" in parent_names:
+                        progress_cb(f"    parent: (wildcard — any workflow)")
 
             # Only keep JSON-serialisable fields
             safe_parsed = {
@@ -217,30 +226,73 @@ class WorkflowDependencyAnalyzer:
         for child_wf_name, child_wf_meta in dependent_workflows.items():
             child_wf_id  = child_wf_meta["workflow_id"]
             parent_names = child_wf_meta["triggered_by"]
+            is_wildcard = child_wf_meta.get("is_wildcard", False)
+
+            # Wildcard workflows (workflows: "*") are observers, not true
+            # dependencies — cascade failure analysis doesn't apply.
+            if is_wildcard:
+                if progress_cb:
+                    progress_cb(
+                        f"Skipping wildcard workflow '{child_wf_name}' "
+                        f"(triggered by any workflow — not a true dependency chain)"
+                    )
+                continue
 
             if progress_cb:
                 progress_cb(
                     f"Analyzing dependent workflow '{child_wf_name}' "
                     f"(ID {child_wf_id}) triggered by {parent_names}..."
                 )
-            
+
             child_runs = [r for r in runs if r.get("workflow_id") == child_wf_id]
-            # child_runs = self.client.get_runs_for_workflow(owner, repo, child_wf_id)
             if progress_cb:
                 progress_cb(f"  → {len(child_runs)} child runs found")
             total_child_runs += len(child_runs)
 
-            for child_run in child_runs:
+            for idx, child_run in enumerate(child_runs, 1):
                 child_run_id     = child_run.get("id")
                 child_conclusion = child_run.get("conclusion")
                 child_head_sha   = child_run.get("head_sha")
+                child_run_url    = child_run.get("html_url")
 
-                # Correlate to parent via commit SHA (more reliable than timing)
-                parent_runs = self.client.find_parent_runs_by_sha(
-                    owner, repo, child_head_sha, parent_names
-                )
+                if progress_cb:
+                    progress_cb(
+                        f"  [{idx}/{len(child_runs)}] Child run #{child_run.get('run_number')} "
+                        f"(id={child_run_id}, conclusion={child_conclusion}, "
+                        f"sha={child_head_sha[:8] if child_head_sha else '?'}) "
+                        f"{child_run_url or ''}"
+                    )
+
+                try:
+                    parent_runs = self.client.find_parent_runs_by_sha(
+                        owner, repo, child_head_sha, parent_names
+                    )
+                except Exception as exc:
+                    if progress_cb:
+                        progress_cb(
+                            f"    ⚠ Error finding parent runs for sha "
+                            f"{child_head_sha[:8] if child_head_sha else '?'}: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                    parent_runs = []
+
                 parent_info       = parent_runs[0] if parent_runs else None
                 parent_conclusion = parent_info.get("conclusion") if parent_info else None
+
+                if progress_cb:
+                    if parent_info:
+                        progress_cb(
+                            f"    ↳ Parent: '{parent_info.get('name')}' "
+                            f"run #{parent_info.get('run_number')} "
+                            f"(id={parent_info.get('id')}, conclusion={parent_conclusion}, "
+                            f"sha={parent_info.get('head_sha', '?')[:8]}) "
+                            f"{parent_info.get('html_url') or ''}"
+                        )
+                    else:
+                        progress_cb(
+                            f"    ↳ Parent: no matching parent run found "
+                            f"for sha {child_head_sha[:8] if child_head_sha else '?'}"
+                        )
 
                 # A child run is a cascade failure when it failed/cancelled AND
                 # its parent was cancelled, failed, or never found
@@ -253,6 +305,11 @@ class WorkflowDependencyAnalyzer:
                 )
 
                 if not is_cascade_failure:
+                    if progress_cb:
+                        progress_cb(
+                            f"    → Not a cascade failure "
+                            f"(child={child_conclusion}, parent={parent_conclusion})"
+                        )
                     continue
 
                 # Tally parent outcome bucket
@@ -267,13 +324,11 @@ class WorkflowDependencyAnalyzer:
                 failed_jobs = self._inspect_failed_jobs(
                     owner, repo, child_run_id, log_pattern_count
                 )
-                # Re-derive count from failed_jobs list
                 log_pattern_count += sum(1 for j in failed_jobs if j["log_patterns"])
 
                 reason = self._classify_parent_outcome(
                     child_wf_name, child_head_sha, parent_info, parent_conclusion
                 )
-                child_run_url  = child_run.get("html_url")
                 parent_run_url = parent_info.get("html_url") if parent_info else None
                 flaky_runs.append({
                     "child_run_id":     child_run_id,
@@ -303,8 +358,10 @@ class WorkflowDependencyAnalyzer:
                     "flakiness_reason": reason,
                 })
                 if progress_cb:
-                    progress_cb(f"  ↳ Cascade failure: '{child_wf_name}' run #{child_run.get('run_number')} ({child_conclusion}) {child_run_url or ''}")
-                    progress_cb(f"  ↳ Parent '{parent_info.get('name') if parent_info else 'unknown'}' run #{parent_info.get('run_number') if parent_info else '?'} ({parent_conclusion}) {parent_run_url or ''}")
+                    progress_cb(
+                        f"    ✗ CASCADE FAILURE: child={child_conclusion}, "
+                        f"parent={parent_conclusion}"
+                    )
 
         return (
             flaky_runs,

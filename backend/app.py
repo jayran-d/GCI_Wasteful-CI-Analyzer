@@ -165,7 +165,7 @@ def analyze_stream():
         all_runs = []
         try:
             for page_num, page_runs, total_count in client.get_workflow_runs_paged(
-                owner, repo, created=created, max_runs=150
+                owner, repo, created=created,max_pages=3
             ):
                 all_runs.extend(page_runs)
                 yield _sse("runs_page", {
