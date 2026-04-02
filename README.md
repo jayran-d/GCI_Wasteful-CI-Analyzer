@@ -164,6 +164,22 @@ curl -X POST http://localhost:5001/api/analyze/stream \
 
 The current backend fetches up to 3 pages of workflow runs per request, or about 300 runs. That limit is a backend implementation choice and can be changed later if needed.
 
+To change that limit, edit the `max_pages` argument in [backend/app.py](backend/app.py) where `get_workflow_runs_paged(...)` is called:
+
+```python
+for page_num, page_runs, total_count in client.get_workflow_runs_paged(
+    owner, repo, created=created, max_pages=3
+):
+```
+
+GitHub returns up to 100 runs per page in this fetch path, so:
+
+- `max_pages=3` means about 300 runs
+- `max_pages=5` means about 500 runs
+- `max_pages=10` means about 1000 runs
+
+If you raise this number, expect longer analysis time and more GitHub API usage.
+
 ## Request Flow
 
 When a user clicks `Analyze`, the request moves through these files:
